@@ -1,8 +1,8 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + 36 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + Frontend ✅ + Unified Serving ✅ + 36 Tests Passing ✅
 
-Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, app statistics with view tracking and trending, **app deprecation workflow with replacement tracking and sunset dates**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
+Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, app statistics with view tracking and trending, app deprecation workflow with replacement tracking and sunset dates, **React frontend with browse/search/submit/admin dashboard served from Rocket via unified serving**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
 ### What's Done
 
@@ -121,13 +121,31 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - Default: 100 req/min for regular keys, 10,000 for admin keys
   - Response headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
   - Returns 429 Too Many Requests when limit exceeded
+- **Frontend:**
+  - React + Vite dashboard served from Rocket via FileServer
+  - Browse tab: paginated app listing with category/protocol filters
+  - Full-text search bar across names, descriptions, tags
+  - Submit tab: form for submitting new apps with all fields
+  - App detail view: reviews, stats, deprecation info, external links
+  - Admin panel: pending app approval/rejection, health overview, batch checks
+  - Trending panel: configurable time window (24h/7d/30d)
+  - API key stored in localStorage, rate limit display in header
+  - Protocol/health/badge color-coding throughout
+  - Dark theme (slate/indigo palette matching qr-service and kanban)
+  - SPA catch-all fallback route (rank 20) serves index.html for client-side routing
+  - STATIC_DIR env var for configurable frontend path (default: frontend/dist)
+- **Unified Serving:**
+  - Backend serves frontend static files via Rocket's FileServer
+  - Auto-detects frontend/dist directory; API-only mode if missing
+  - Single port, single binary deployment
 - **Auth:** API key authentication via `Authorization: Bearer` or `X-API-Key`
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
-- **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
-- **Config:** Environment variables via `.env` / `dotenvy`
+- **Docker:** Dockerfile (3-stage: Node frontend → Rust backend → Debian slim runtime)
+- **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT, RATE_LIMIT_WINDOW_SECS, HEALTH_CHECK_INTERVAL_SECS, STATIC_DIR)
 - **Tests:** 36 tests passing (20 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
 - **README:** Complete with setup, API reference, approval workflow, webhooks, health monitoring, scheduled checks docs, examples
+- **Deployment:** Single-port unified serving (API + frontend on same origin)
 
 ### Tech Stack
 
@@ -166,9 +184,10 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 4. ~~**App approval workflow**~~ ✅ Done
 5. ~~**App statistics**~~ ✅ Done — view tracking, per-app stats, trending endpoint
 6. ~~**App deprecation workflow**~~ ✅ Done — deprecate/undeprecate with replacement tracking + sunset dates
-7. **Frontend** — React or lightweight dashboard for human browsing
+7. ~~**Frontend**~~ ✅ Done — React dashboard with browse/search/submit/admin/trending + unified serving
+8. **Update README** — Document frontend, unified serving, STATIC_DIR env var
 
-**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
+**Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 36 tests pass.
 
 ### ⚠️ Gotchas
 
@@ -217,4 +236,4 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 ---
 
-*Last updated: 2026-02-07 13:20 UTC — Session: Deprecation workflow shipped (deprecate/undeprecate + replacement tracking + sunset dates + 1 test)*
+*Last updated: 2026-02-07 14:09 UTC — Session: React frontend + unified serving + 3-stage Dockerfile + clippy fixes*
