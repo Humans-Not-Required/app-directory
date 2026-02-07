@@ -271,7 +271,7 @@ pub fn list_apps(
 
     // Fetch page
     let query = format!(
-        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at, last_health_status, last_checked_at, uptime_pct
+        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at, last_health_status, last_checked_at, uptime_pct, review_note, reviewed_by, reviewed_at
          FROM apps WHERE {} ORDER BY {} LIMIT ?{} OFFSET ?{}",
         where_clause,
         order,
@@ -314,6 +314,9 @@ pub fn list_apps(
                     "last_health_status": row.get::<_, Option<String>>(21)?,
                     "last_checked_at": row.get::<_, Option<String>>(22)?,
                     "uptime_pct": row.get::<_, Option<f64>>(23)?,
+                    "review_note": row.get::<_, Option<String>>(24)?,
+                    "reviewed_by": row.get::<_, Option<String>>(25)?,
+                    "reviewed_at": row.get::<_, Option<String>>(26)?,
                 }))
             },
         )
@@ -340,7 +343,7 @@ pub fn get_app(
     let conn = db.0.lock().unwrap();
 
     let result = conn.query_row(
-        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at, last_health_status, last_checked_at, uptime_pct
+        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at, last_health_status, last_checked_at, uptime_pct, review_note, reviewed_by, reviewed_at
          FROM apps WHERE id = ?1 OR slug = ?1",
         rusqlite::params![id_or_slug],
         |row| {
@@ -371,6 +374,9 @@ pub fn get_app(
                 "last_health_status": row.get::<_, Option<String>>(21)?,
                 "last_checked_at": row.get::<_, Option<String>>(22)?,
                 "uptime_pct": row.get::<_, Option<f64>>(23)?,
+                "review_note": row.get::<_, Option<String>>(24)?,
+                "reviewed_by": row.get::<_, Option<String>>(25)?,
+                "reviewed_at": row.get::<_, Option<String>>(26)?,
             }))
         },
     );
@@ -992,6 +998,7 @@ pub struct WebhookResponse {
 static VALID_WEBHOOK_EVENTS: &[&str] = &[
     "app.submitted",
     "app.approved",
+    "app.rejected",
     "app.updated",
     "app.deleted",
     "review.submitted",
@@ -1258,6 +1265,273 @@ pub fn delete_webhook(
             Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
         ),
     }
+}
+
+// === App Approval Workflow ===
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ApproveRequest {
+    pub note: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RejectRequest {
+    pub reason: String,
+}
+
+/// Approve a pending app. Admin only.
+/// Transitions: pending → approved, rejected → approved (re-approval).
+#[post("/apps/<id>/approve", format = "json", data = "<body>")]
+pub fn approve_app(
+    key: AuthenticatedKey,
+    id: &str,
+    body: Json<ApproveRequest>,
+    db: &rocket::State<DbState>,
+    bus: &rocket::State<EventBus>,
+) -> (Status, Json<Value>) {
+    if !key.is_admin {
+        return (
+            Status::Forbidden,
+            Json(json!({ "error": "ADMIN_REQUIRED", "message": "Only admins can approve apps" })),
+        );
+    }
+
+    let conn = db.0.lock().unwrap();
+
+    // Get current status
+    let current: Result<(String, String), _> = conn.query_row(
+        "SELECT status, name FROM apps WHERE id = ?1",
+        rusqlite::params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    );
+
+    let (current_status, app_name) = match current {
+        Ok(v) => v,
+        Err(_) => {
+            return (
+                Status::NotFound,
+                Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
+            )
+        }
+    };
+
+    if current_status == "approved" {
+        return (
+            Status::Conflict,
+            Json(json!({ "error": "ALREADY_APPROVED", "message": "App is already approved" })),
+        );
+    }
+
+    if current_status == "deprecated" {
+        return (
+            Status::Conflict,
+            Json(
+                json!({ "error": "INVALID_TRANSITION", "message": "Cannot approve a deprecated app. Unset deprecated status first." }),
+            ),
+        );
+    }
+
+    match conn.execute(
+        "UPDATE apps SET status = 'approved', review_note = ?1, reviewed_by = ?2, reviewed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?3",
+        rusqlite::params![body.note, key.id, id],
+    ) {
+        Ok(1) => {
+            bus.emit(AppEvent {
+                event: "app.approved".to_string(),
+                data: json!({
+                    "app_id": id,
+                    "name": app_name,
+                    "previous_status": current_status,
+                    "reviewed_by": key.id,
+                    "note": body.note,
+                }),
+            });
+
+            (
+                Status::Ok,
+                Json(json!({
+                    "message": "App approved",
+                    "app_id": id,
+                    "previous_status": current_status,
+                })),
+            )
+        }
+        Ok(_) => (
+            Status::NotFound,
+            Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
+        ),
+        Err(e) => (
+            Status::InternalServerError,
+            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+        ),
+    }
+}
+
+/// Reject a pending app. Admin only. Requires a reason.
+/// Transitions: pending → rejected, approved → rejected (revocation).
+#[post("/apps/<id>/reject", format = "json", data = "<body>")]
+pub fn reject_app(
+    key: AuthenticatedKey,
+    id: &str,
+    body: Json<RejectRequest>,
+    db: &rocket::State<DbState>,
+    bus: &rocket::State<EventBus>,
+) -> (Status, Json<Value>) {
+    if !key.is_admin {
+        return (
+            Status::Forbidden,
+            Json(json!({ "error": "ADMIN_REQUIRED", "message": "Only admins can reject apps" })),
+        );
+    }
+
+    if body.reason.trim().is_empty() {
+        return (
+            Status::BadRequest,
+            Json(
+                json!({ "error": "REASON_REQUIRED", "message": "A reason is required when rejecting an app" }),
+            ),
+        );
+    }
+
+    let conn = db.0.lock().unwrap();
+
+    let current: Result<(String, String), _> = conn.query_row(
+        "SELECT status, name FROM apps WHERE id = ?1",
+        rusqlite::params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    );
+
+    let (current_status, app_name) = match current {
+        Ok(v) => v,
+        Err(_) => {
+            return (
+                Status::NotFound,
+                Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
+            )
+        }
+    };
+
+    if current_status == "rejected" {
+        return (
+            Status::Conflict,
+            Json(json!({ "error": "ALREADY_REJECTED", "message": "App is already rejected" })),
+        );
+    }
+
+    if current_status == "deprecated" {
+        return (
+            Status::Conflict,
+            Json(
+                json!({ "error": "INVALID_TRANSITION", "message": "Cannot reject a deprecated app" }),
+            ),
+        );
+    }
+
+    match conn.execute(
+        "UPDATE apps SET status = 'rejected', review_note = ?1, reviewed_by = ?2, reviewed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?3",
+        rusqlite::params![body.reason, key.id, id],
+    ) {
+        Ok(1) => {
+            bus.emit(AppEvent {
+                event: "app.rejected".to_string(),
+                data: json!({
+                    "app_id": id,
+                    "name": app_name,
+                    "previous_status": current_status,
+                    "reviewed_by": key.id,
+                    "reason": body.reason,
+                }),
+            });
+
+            (
+                Status::Ok,
+                Json(json!({
+                    "message": "App rejected",
+                    "app_id": id,
+                    "previous_status": current_status,
+                    "reason": body.reason,
+                })),
+            )
+        }
+        Ok(_) => (
+            Status::NotFound,
+            Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
+        ),
+        Err(e) => (
+            Status::InternalServerError,
+            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+        ),
+    }
+}
+
+/// List pending apps. Admin only. Convenience endpoint.
+#[get("/apps/pending?<page>&<per_page>")]
+pub fn list_pending_apps(
+    key: AuthenticatedKey,
+    page: Option<i64>,
+    per_page: Option<i64>,
+    db: &rocket::State<DbState>,
+) -> (Status, Json<Value>) {
+    if !key.is_admin {
+        return (
+            Status::Forbidden,
+            Json(
+                json!({ "error": "ADMIN_REQUIRED", "message": "Only admins can view pending apps" }),
+            ),
+        );
+    }
+
+    let conn = db.0.lock().unwrap();
+
+    let page = page.unwrap_or(1).max(1);
+    let per_page = per_page.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * per_page;
+
+    let total: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM apps WHERE status = 'pending'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, slug, short_description, protocol, category, tags, author_name, created_at, submitted_by_key_id
+             FROM apps WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?1 OFFSET ?2",
+        )
+        .unwrap();
+
+    let apps: Vec<Value> = stmt
+        .query_map(rusqlite::params![per_page, offset], |row| {
+            let tags_str: String = row.get(6)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+            Ok(json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "slug": row.get::<_, String>(2)?,
+                "short_description": row.get::<_, String>(3)?,
+                "protocol": row.get::<_, String>(4)?,
+                "category": row.get::<_, String>(5)?,
+                "tags": tags,
+                "author_name": row.get::<_, String>(7)?,
+                "created_at": row.get::<_, String>(8)?,
+                "submitted_by_key_id": row.get::<_, String>(9)?,
+            }))
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    (
+        Status::Ok,
+        Json(json!({
+            "items": apps,
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        })),
+    )
 }
 
 // Use the models module

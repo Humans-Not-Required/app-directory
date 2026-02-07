@@ -62,6 +62,27 @@ Full OpenAPI spec available at `GET /api/v1/openapi.json`.
 | `PATCH` | `/api/v1/apps/<id>` | Update app (owner/admin) |
 | `DELETE` | `/api/v1/apps/<id>` | Delete app (owner/admin) |
 
+### Approval Workflow
+
+Non-admin submissions start as `pending`. Admins review and approve or reject:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/apps/pending` | List pending apps (admin only) |
+| `POST` | `/api/v1/apps/<id>/approve` | Approve app (admin only) |
+| `POST` | `/api/v1/apps/<id>/reject` | Reject app with reason (admin only) |
+
+**Approve** accepts an optional `note`. **Reject** requires a `reason`.
+Both record who reviewed, when, and the note/reason on the app record.
+Emits `app.approved` or `app.rejected` events (SSE + webhooks).
+
+State transitions:
+- `pending` → `approved` ✅
+- `pending` → `rejected` ✅
+- `rejected` → `approved` ✅ (re-approval)
+- `approved` → `rejected` ✅ (revocation)
+- `deprecated` → approve/reject ❌ (blocked)
+
 ### Reviews
 
 | Method | Endpoint | Description |
@@ -158,7 +179,7 @@ Scheduled checks behave identically to batch health checks: they check all appro
 
 Receive real-time notifications when events occur. Admin-only management. Payloads are signed with HMAC-SHA256.
 
-**Events:** `app.submitted`, `app.approved`, `app.updated`, `app.deleted`, `review.submitted`, `health.checked`
+**Events:** `app.submitted`, `app.approved`, `app.rejected`, `app.updated`, `app.deleted`, `review.submitted`, `health.checked`
 
 **Register a webhook:**
 ```bash
@@ -237,7 +258,8 @@ curl -N -H "Authorization: Bearer YOUR_KEY" http://localhost:8002/api/v1/events/
 | Event | Description |
 |-------|-------------|
 | `app.submitted` | New app submitted (pending review) |
-| `app.approved` | App approved (auto-approved or via admin) |
+| `app.approved` | App approved (auto-approved or via workflow) |
+| `app.rejected` | App rejected by admin (includes reason) |
 | `app.updated` | App details updated |
 | `app.deleted` | App deleted |
 | `review.submitted` | New review submitted |

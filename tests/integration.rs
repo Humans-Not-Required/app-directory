@@ -1104,3 +1104,241 @@ fn test_schedule_endpoint() {
         .dispatch();
     assert_eq!(response.status(), Status::Forbidden);
 }
+
+// === Approval Workflow Tests ===
+
+#[test]
+fn test_approve_pending_app() {
+    let (client, admin_key) = setup_client();
+
+    // Create a non-admin key
+    let response = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "submitter" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let agent_key = body["key"].as_str().unwrap().to_string();
+
+    // Submit app as non-admin (status = pending)
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Pending App",
+                "short_description": "Awaiting approval",
+                "description": "This app needs admin review",
+                "author_name": "Test Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "pending");
+
+    // Verify it shows in pending list
+    let response = client
+        .get("/api/v1/apps/pending")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["id"], app_id);
+
+    // Approve the app
+    let response = client
+        .post(format!("/api/v1/apps/{}/approve", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "note": "Looks good!" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["message"], "App approved");
+    assert_eq!(body["previous_status"], "pending");
+
+    // Verify app is now approved with review metadata
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"], "approved");
+    assert_eq!(body["review_note"], "Looks good!");
+    assert!(body["reviewed_at"].is_string());
+
+    // Pending list should now be empty
+    let response = client
+        .get("/api/v1/apps/pending")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 0);
+
+    // Approving again should 409
+    let response = client
+        .post(format!("/api/v1/apps/{}/approve", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "note": null }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+}
+
+#[test]
+fn test_reject_pending_app() {
+    let (client, admin_key) = setup_client();
+
+    // Create a non-admin key
+    let response = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "submitter" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let agent_key = body["key"].as_str().unwrap().to_string();
+
+    // Submit app as non-admin
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Bad App",
+                "short_description": "Gonna get rejected",
+                "description": "Spam or low quality",
+                "author_name": "Spammer"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Reject without reason should fail
+    let response = client
+        .post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+
+    // Reject with reason
+    let response = client
+        .post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "Low quality submission, no API URL provided" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["message"], "App rejected");
+    assert_eq!(
+        body["reason"],
+        "Low quality submission, no API URL provided"
+    );
+
+    // Verify app status
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"], "rejected");
+    assert_eq!(
+        body["review_note"],
+        "Low quality submission, no API URL provided"
+    );
+
+    // Rejecting again should 409
+    let response = client
+        .post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "Still bad" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+
+    // But can re-approve a rejected app
+    let response = client
+        .post(format!("/api/v1/apps/{}/approve", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "note": "On second thought, this is fine" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["previous_status"], "rejected");
+}
+
+#[test]
+fn test_approval_requires_admin() {
+    let (client, admin_key) = setup_client();
+
+    // Create a non-admin key
+    let response = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "agent" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let agent_key = body["key"].as_str().unwrap().to_string();
+
+    // Submit app as non-admin
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "My App",
+                "short_description": "Test",
+                "description": "Test app",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Non-admin tries to approve — forbidden
+    let response = client
+        .post(format!("/api/v1/apps/{}/approve", app_id))
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "note": null }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+
+    // Non-admin tries to reject — forbidden
+    let response = client
+        .post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "I don't like it" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+
+    // Non-admin tries to view pending list — forbidden
+    let response = client
+        .get("/api/v1/apps/pending")
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+}

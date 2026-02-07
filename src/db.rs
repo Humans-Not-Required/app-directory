@@ -116,5 +116,16 @@ pub fn init_db(path: &str) -> Connection {
         .expect("Failed to add health check columns");
     }
 
+    // Migration: add approval workflow columns if missing
+    let has_review_note: bool = conn.prepare("SELECT review_note FROM apps LIMIT 0").is_ok();
+    if !has_review_note {
+        conn.execute_batch(
+            "ALTER TABLE apps ADD COLUMN review_note TEXT;
+             ALTER TABLE apps ADD COLUMN reviewed_by TEXT;
+             ALTER TABLE apps ADD COLUMN reviewed_at TEXT;",
+        )
+        .expect("Failed to add approval workflow columns");
+    }
+
     conn
 }

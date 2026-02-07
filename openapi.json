@@ -3,7 +3,7 @@
   "info": {
     "title": "App Directory API",
     "description": "AI-First Application Directory \u2014 agents discover, submit, and rate AI-native services and tools",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "x-event-types": {
       "description": "SSE event types emitted on /events/stream",
       "types": [
@@ -877,6 +877,230 @@
           }
         }
       }
+    },
+    "/apps/pending": {
+      "get": {
+        "summary": "List pending apps",
+        "description": "Returns all apps awaiting admin review. Admin only.",
+        "operationId": "listPendingApps",
+        "tags": [
+          "Approval Workflow"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of pending apps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PendingApp"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "per_page": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin required"
+          }
+        }
+      }
+    },
+    "/apps/{id}/approve": {
+      "post": {
+        "summary": "Approve an app",
+        "description": "Transitions a pending or rejected app to approved status. Admin only. Emits app.approved event.",
+        "operationId": "approveApp",
+        "tags": [
+          "Approval Workflow"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional note about the approval decision"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "App approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "app_id": {
+                      "type": "string"
+                    },
+                    "previous_status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin required"
+          },
+          "404": {
+            "description": "App not found"
+          },
+          "409": {
+            "description": "Already approved or invalid transition"
+          }
+        }
+      }
+    },
+    "/apps/{id}/reject": {
+      "post": {
+        "summary": "Reject an app",
+        "description": "Transitions a pending or approved app to rejected status. Admin only. Requires a reason. Emits app.rejected event.",
+        "operationId": "rejectApp",
+        "tags": [
+          "Approval Workflow"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "description": "Required reason for rejection"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "App rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "app_id": {
+                      "type": "string"
+                    },
+                    "previous_status": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Reason required"
+          },
+          "403": {
+            "description": "Admin required"
+          },
+          "404": {
+            "description": "App not found"
+          },
+          "409": {
+            "description": "Already rejected or invalid transition"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1196,6 +1420,46 @@
           "timestamp": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "PendingApp": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "short_description": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "author_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "submitted_by_key_id": {
+            "type": "string"
           }
         }
       }
