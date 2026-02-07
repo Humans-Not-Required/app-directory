@@ -54,9 +54,21 @@ fn test_health() {
 }
 
 #[test]
-fn test_auth_required() {
+fn test_public_endpoints_no_auth() {
     let (client, _) = setup_client();
+    // List apps is public (no auth required)
     let response = client.get("/api/v1/apps").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    // Categories is public
+    let response = client.get("/api/v1/categories").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    // Search is public
+    let response = client.get("/api/v1/apps/search?q=test").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    // Admin endpoints still require auth
+    let response = client.get("/api/v1/keys").dispatch();
+    assert_eq!(response.status(), Status::Unauthorized);
+    let response = client.get("/api/v1/webhooks").dispatch();
     assert_eq!(response.status(), Status::Unauthorized);
 }
 
@@ -85,7 +97,7 @@ fn test_submit_and_get_app() {
 
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
     assert_eq!(body["status"], "approved"); // admin auto-approves
     assert_eq!(body["slug"], "test-qr-service");
 
@@ -138,7 +150,7 @@ fn test_list_apps() {
     assert_eq!(response.status(), Status::Ok);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["total"], 2);
-    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+    assert_eq!(body["apps"].as_array().unwrap().len(), 2);
 }
 
 #[test]
@@ -208,7 +220,7 @@ fn test_submit_and_get_review() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Submit review
     let response = client
@@ -227,7 +239,7 @@ fn test_submit_and_get_review() {
     assert_eq!(response.status(), Status::Ok);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["total"], 1);
-    assert_eq!(body["items"][0]["rating"], 4);
+    assert_eq!(body["reviews"][0]["rating"], 4);
 
     // Check avg rating was updated
     let response = client
@@ -257,7 +269,7 @@ fn test_update_app() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Update
     let response = client
@@ -296,7 +308,7 @@ fn test_delete_app() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Delete
     let response = client
@@ -388,7 +400,7 @@ fn test_api_key_management() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    assert!(body["key"].as_str().unwrap().starts_with("ad_"));
+    assert!(body["api_key"].as_str().unwrap().starts_with("ad_"));
 }
 
 #[test]
@@ -425,10 +437,10 @@ fn test_rate_limiting() {
     ).unwrap();
     drop(conn);
 
-    // First 3 requests should succeed with rate limit headers (use categories — authenticated endpoint)
+    // First 3 requests should succeed with rate limit headers (use /apps/mine — requires auth)
     for i in 0..3 {
         let response = client
-            .get("/api/v1/categories")
+            .get("/api/v1/apps/mine")
             .header(Header::new("X-API-Key", test_key))
             .dispatch();
         assert_eq!(
@@ -448,7 +460,7 @@ fn test_rate_limiting() {
 
     // 4th request should be rate limited
     let response = client
-        .get("/api/v1/categories")
+        .get("/api/v1/apps/mine")
         .header(Header::new("X-API-Key", test_key))
         .dispatch();
     assert_eq!(response.status(), Status::TooManyRequests);
@@ -458,8 +470,9 @@ fn test_rate_limiting() {
 fn test_rate_limit_headers_present() {
     let (client, key) = setup_client();
 
+    // Use /apps/mine — requires auth, so rate limit headers appear
     let response = client
-        .get("/api/v1/categories")
+        .get("/api/v1/apps/mine")
         .header(Header::new("X-API-Key", key))
         .dispatch();
     assert_eq!(response.status(), Status::Ok);
@@ -493,7 +506,7 @@ fn test_badges_default_false() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Get app — badges should be false
     let response = client
@@ -525,7 +538,7 @@ fn test_admin_set_badges() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Admin sets featured badge
     let response = client
@@ -577,7 +590,7 @@ fn test_non_admin_cannot_set_badges() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let agent_key = body["key"].as_str().unwrap().to_string();
+    let agent_key = body["api_key"].as_str().unwrap().to_string();
 
     // Submit app as regular agent
     let response = client
@@ -595,7 +608,7 @@ fn test_non_admin_cannot_set_badges() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Non-admin tries to set badges — should be forbidden
     let response = client
@@ -638,7 +651,7 @@ fn test_filter_featured_apps() {
             )
             .dispatch();
         let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-        app_ids.push(body["id"].as_str().unwrap().to_string());
+        app_ids.push(body["app_id"].as_str().unwrap().to_string());
     }
 
     // Feature only the first app
@@ -664,7 +677,7 @@ fn test_filter_featured_apps() {
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["total"], 1);
-    assert_eq!(body["items"][0]["name"], "App One");
+    assert_eq!(body["apps"][0]["name"], "App One");
 
     // Filter by verified
     let response = client
@@ -673,7 +686,7 @@ fn test_filter_featured_apps() {
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["total"], 1);
-    assert_eq!(body["items"][0]["name"], "App Two");
+    assert_eq!(body["apps"][0]["name"], "App Two");
 
     // No filter — all 3 apps
     let response = client
@@ -698,7 +711,7 @@ fn test_health_check_requires_admin() {
         .body(r#"{ "name": "agent-key" }"#)
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let agent_key = body["key"].as_str().unwrap().to_string();
+    let agent_key = body["api_key"].as_str().unwrap().to_string();
 
     // Submit an app with a URL
     let response = client
@@ -716,7 +729,7 @@ fn test_health_check_requires_admin() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Non-admin should be forbidden
     let response = client
@@ -745,7 +758,7 @@ fn test_health_check_no_url() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Health check should return 422 (no URL to check)
     let response = client
@@ -788,7 +801,7 @@ fn test_health_history_empty() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Health history should be empty
     let response = client
@@ -837,7 +850,7 @@ fn test_app_includes_health_fields() {
         )
         .dispatch();
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Get app — should include health fields (null by default)
     let response = client
@@ -860,7 +873,7 @@ fn test_app_includes_health_fields() {
         .dispatch();
     assert_eq!(response.status(), Status::Ok);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let first_app = &body["items"][0];
+    let first_app = &body["apps"][0];
     assert!(first_app.get("last_health_status").is_some());
     assert!(first_app.get("last_checked_at").is_some());
     assert!(first_app.get("uptime_pct").is_some());
@@ -990,7 +1003,7 @@ fn test_webhook_requires_admin() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let user_key = body["key"].as_str().unwrap().to_string();
+    let user_key = body["api_key"].as_str().unwrap().to_string();
 
     // Try to create webhook with non-admin key
     let response = client
@@ -1111,70 +1124,26 @@ fn test_schedule_endpoint() {
 fn test_approve_pending_app() {
     let (client, admin_key) = setup_client();
 
-    // Create a non-admin key
-    let response = client
-        .post("/api/v1/keys")
-        .header(Header::new("X-API-Key", admin_key.clone()))
-        .header(ContentType::JSON)
-        .body(r#"{ "name": "submitter" }"#)
-        .dispatch();
-    assert_eq!(response.status(), Status::Created);
-    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let agent_key = body["key"].as_str().unwrap().to_string();
-
-    // Submit app as non-admin (status = pending)
+    // All submissions auto-approve in the open-read model
     let response = client
         .post("/api/v1/apps")
-        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(Header::new("X-API-Key", admin_key.clone()))
         .header(ContentType::JSON)
         .body(
             r#"{
-                "name": "Pending App",
-                "short_description": "Awaiting approval",
-                "description": "This app needs admin review",
+                "name": "Auto Approved App",
+                "short_description": "Should be approved immediately",
+                "description": "All submissions go live immediately",
                 "author_name": "Test Agent"
             }"#,
         )
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
-    assert_eq!(body["status"], "pending");
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "approved"); // auto-approved
 
-    // Verify it shows in pending list
-    let response = client
-        .get("/api/v1/apps/pending")
-        .header(Header::new("X-API-Key", admin_key.clone()))
-        .dispatch();
-    assert_eq!(response.status(), Status::Ok);
-    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    assert_eq!(body["total"], 1);
-    assert_eq!(body["items"][0]["id"], app_id);
-
-    // Approve the app
-    let response = client
-        .post(format!("/api/v1/apps/{}/approve", app_id))
-        .header(Header::new("X-API-Key", admin_key.clone()))
-        .header(ContentType::JSON)
-        .body(r#"{ "note": "Looks good!" }"#)
-        .dispatch();
-    assert_eq!(response.status(), Status::Ok);
-    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    assert_eq!(body["message"], "App approved");
-    assert_eq!(body["previous_status"], "pending");
-
-    // Verify app is now approved with review metadata
-    let response = client
-        .get(format!("/api/v1/apps/{}", app_id))
-        .header(Header::new("X-API-Key", admin_key.clone()))
-        .dispatch();
-    assert_eq!(response.status(), Status::Ok);
-    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    assert_eq!(body["status"], "approved");
-    assert_eq!(body["review_note"], "Looks good!");
-    assert!(body["reviewed_at"].is_string());
-
-    // Pending list should now be empty
+    // Pending list should be empty (no pending queue in open-read model)
     let response = client
         .get("/api/v1/apps/pending")
         .header(Header::new("X-API-Key", admin_key.clone()))
@@ -1183,35 +1152,66 @@ fn test_approve_pending_app() {
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["total"], 0);
 
-    // Approving again should 409
+    // Approving an already-approved app should 409
     let response = client
         .post(format!("/api/v1/apps/{}/approve", app_id))
         .header(Header::new("X-API-Key", admin_key.clone()))
         .header(ContentType::JSON)
-        .body(r#"{ "note": null }"#)
+        .body(r#"{ "note": "Already approved" }"#)
         .dispatch();
     assert_eq!(response.status(), Status::Conflict);
+
+    // Admin can reject an approved app
+    let response = client
+        .post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "Violates policy" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["message"], "App rejected");
+    assert_eq!(body["previous_status"], "approved");
+
+    // Verify app is now rejected
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"], "rejected");
+
+    // Admin can re-approve a rejected app
+    let response = client
+        .post(format!("/api/v1/apps/{}/approve", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "note": "Reconsidered — looks fine" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["message"], "App approved");
+    assert_eq!(body["previous_status"], "rejected");
+
+    // Verify review metadata
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"], "approved");
+    assert_eq!(body["review_note"], "Reconsidered — looks fine");
+    assert!(body["reviewed_at"].is_string());
 }
 
 #[test]
 fn test_reject_pending_app() {
     let (client, admin_key) = setup_client();
 
-    // Create a non-admin key
-    let response = client
-        .post("/api/v1/keys")
-        .header(Header::new("X-API-Key", admin_key.clone()))
-        .header(ContentType::JSON)
-        .body(r#"{ "name": "submitter" }"#)
-        .dispatch();
-    assert_eq!(response.status(), Status::Created);
-    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let agent_key = body["key"].as_str().unwrap().to_string();
-
-    // Submit app as non-admin
+    // Submit app (auto-approved)
     let response = client
         .post("/api/v1/apps")
-        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(Header::new("X-API-Key", admin_key.clone()))
         .header(ContentType::JSON)
         .body(
             r#"{
@@ -1224,7 +1224,8 @@ fn test_reject_pending_app() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "approved"); // auto-approved
 
     // Reject without reason should fail
     let response = client
@@ -1253,7 +1254,6 @@ fn test_reject_pending_app() {
     // Verify app status
     let response = client
         .get(format!("/api/v1/apps/{}", app_id))
-        .header(Header::new("X-API-Key", admin_key.clone()))
         .dispatch();
     assert_eq!(response.status(), Status::Ok);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
@@ -1297,9 +1297,9 @@ fn test_approval_requires_admin() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let agent_key = body["key"].as_str().unwrap().to_string();
+    let agent_key = body["api_key"].as_str().unwrap().to_string();
 
-    // Submit app as non-admin
+    // Submit app (auto-approved)
     let response = client
         .post("/api/v1/apps")
         .header(Header::new("X-API-Key", agent_key.clone()))
@@ -1315,16 +1315,8 @@ fn test_approval_requires_admin() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
-
-    // Non-admin tries to approve — forbidden
-    let response = client
-        .post(format!("/api/v1/apps/{}/approve", app_id))
-        .header(Header::new("X-API-Key", agent_key.clone()))
-        .header(ContentType::JSON)
-        .body(r#"{ "note": null }"#)
-        .dispatch();
-    assert_eq!(response.status(), Status::Forbidden);
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "approved"); // auto-approved
 
     // Non-admin tries to reject — forbidden
     let response = client
@@ -1356,7 +1348,7 @@ fn test_app_stats() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let app_id = body["id"].as_str().unwrap().to_string();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Stats should start at zero
     let response = client
@@ -1431,7 +1423,7 @@ fn test_trending_apps() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let hot_id = body["id"].as_str().unwrap().to_string();
+    let hot_id = body["app_id"].as_str().unwrap().to_string();
 
     let response = client
         .post("/api/v1/apps")
@@ -1441,7 +1433,7 @@ fn test_trending_apps() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let cold_id = body["id"].as_str().unwrap().to_string();
+    let cold_id = body["app_id"].as_str().unwrap().to_string();
 
     // View hot app 5 times, cold app 2 times
     for _ in 0..5 {
@@ -1495,7 +1487,7 @@ fn test_deprecation_workflow() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let old_app_id = body["id"].as_str().unwrap().to_string();
+    let old_app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Submit a replacement app
     let response = client
@@ -1506,7 +1498,7 @@ fn test_deprecation_workflow() {
         .dispatch();
     assert_eq!(response.status(), Status::Created);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    let new_app_id = body["id"].as_str().unwrap().to_string();
+    let new_app_id = body["app_id"].as_str().unwrap().to_string();
 
     // Deprecate without reason → 400
     let response = client

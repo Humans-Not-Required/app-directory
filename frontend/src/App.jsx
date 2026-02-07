@@ -89,7 +89,7 @@ function AppCard({ app, onClick }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           <Badge label={app.category} color="#6366f1" small />
-          {app.tags && JSON.parse(app.tags || '[]').slice(0, 3).map((t) => (
+          {app.tags && (Array.isArray(app.tags) ? app.tags : JSON.parse(app.tags || '[]')).slice(0, 3).map((t) => (
             <Badge key={t} label={t} color="#475569" small />
           ))}
         </div>
@@ -126,7 +126,7 @@ function AppDetail({ app, onBack, onRefresh }) {
     setSubmitting(false);
   };
 
-  const tags = JSON.parse(app.tags || '[]');
+  const tags = Array.isArray(app.tags) ? app.tags : JSON.parse(app.tags || '[]');
 
   return (
     <div>
