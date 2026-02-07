@@ -14,8 +14,10 @@ pub mod webhooks;
 
 use rate_limit::{RateLimitHeaders, RateLimiter};
 use rocket::fairing::{Fairing, Info, Kind};
+use rocket::fs::{FileServer, Options};
 use rocket::http::Header;
 use rocket::{Request, Response};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -48,6 +50,17 @@ impl Fairing for Cors {
 }
 
 pub struct DbState(pub Mutex<rusqlite::Connection>);
+
+/// SPA catch-all: serves index.html for any unmatched GET (client-side routing)
+#[get("/<_..>", rank = 20)]
+pub async fn spa_fallback() -> Option<rocket::fs::NamedFile> {
+    let static_dir: PathBuf = std::env::var("STATIC_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("frontend/dist"));
+    rocket::fs::NamedFile::open(static_dir.join("index.html"))
+        .await
+        .ok()
+}
 
 pub fn rocket() -> rocket::Rocket<rocket::Build> {
     dotenvy::dotenv().ok();
@@ -86,7 +99,12 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
     let webhook_db = webhooks::init_webhook_db();
     let event_bus = events::EventBus::with_webhooks(webhook_db);
 
-    rocket::custom(figment)
+    // Frontend static files directory
+    let static_dir: PathBuf = std::env::var("STATIC_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("frontend/dist"));
+
+    let mut rocket = rocket::custom(figment)
         .manage(DbState(Mutex::new(conn)))
         .manage(RateLimiter::new(Duration::from_secs(window_secs)))
         .manage(event_bus)
@@ -129,5 +147,20 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 stats::get_app_stats,
                 stats::trending_apps,
             ],
-        )
+        );
+
+    // Serve frontend static files if the directory exists
+    if static_dir.is_dir() {
+        println!("📦 Serving frontend from: {}", static_dir.display());
+        rocket = rocket
+            .mount("/", FileServer::new(&static_dir, Options::Index))
+            .mount("/", routes![spa_fallback]);
+    } else {
+        println!(
+            "⚡ API-only mode (no frontend at {})",
+            static_dir.display()
+        );
+    }
+
+    rocket
 }

@@ -362,8 +362,8 @@ fn test_categories_endpoint() {
         .dispatch();
     assert_eq!(response.status(), Status::Ok);
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
-    assert!(body["valid_categories"].as_array().unwrap().len() > 0);
-    assert!(body["valid_protocols"].as_array().unwrap().len() > 0);
+    assert!(!body["valid_categories"].as_array().unwrap().is_empty());
+    assert!(!body["valid_protocols"].as_array().unwrap().is_empty());
     assert_eq!(body["categories"][0]["name"], "data");
     assert_eq!(body["categories"][0]["count"], 1);
 }
