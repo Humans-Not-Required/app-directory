@@ -338,7 +338,7 @@ pub fn list_apps(
         .collect();
 
     Json(json!({
-        "items": apps,
+        "apps": apps,
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -775,7 +775,7 @@ pub fn search_apps(
         .collect();
 
     Json(json!({
-        "items": apps,
+        "apps": apps,
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -910,7 +910,7 @@ pub fn get_reviews(
         .collect();
 
     Json(json!({
-        "items": reviews,
+        "reviews": reviews,
         "total": total,
         "page": page,
         "per_page": per_page,
@@ -1809,7 +1809,7 @@ pub fn list_pending_apps(
     (
         Status::Ok,
         Json(json!({
-            "items": apps,
+            "apps": apps,
             "total": total,
             "page": page,
             "per_page": per_page,
