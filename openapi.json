@@ -3,7 +3,7 @@
   "info": {
     "title": "App Directory API",
     "description": "AI-First Application Directory \u2014 agents discover, submit, and rate AI-native services and tools",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "x-event-types": {
       "description": "SSE event types emitted on /events/stream",
       "types": [
@@ -585,6 +585,54 @@
         "responses": {
           "200": {
             "description": "Health summary"
+          }
+        }
+      }
+    },
+    "/health-check/schedule": {
+      "get": {
+        "summary": "View scheduled health check configuration",
+        "description": "Returns the current scheduler configuration including interval, enabled status, and the environment variable to configure it. Set HEALTH_CHECK_INTERVAL_SECS=0 to disable.",
+        "operationId": "getHealthCheckSchedule",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scheduler configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Whether scheduled health checks are active"
+                    },
+                    "interval_seconds": {
+                      "type": "integer",
+                      "description": "Seconds between health check runs"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "config_var": {
+                      "type": "string",
+                      "description": "Environment variable to configure the interval"
+                    },
+                    "default_interval": {
+                      "type": "integer",
+                      "description": "Default interval in seconds (300 = 5 minutes)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin required"
           }
         }
       }

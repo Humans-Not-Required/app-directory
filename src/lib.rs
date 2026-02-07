@@ -8,6 +8,7 @@ pub mod health;
 pub mod models;
 pub mod rate_limit;
 pub mod routes;
+pub mod scheduler;
 pub mod webhooks;
 
 use rate_limit::{RateLimitHeaders, RateLimiter};
@@ -90,6 +91,7 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
         .manage(event_bus)
         .attach(Cors)
         .attach(RateLimitHeaders)
+        .attach(scheduler::ScheduledHealthChecks)
         .mount(
             "/api/v1",
             routes![
@@ -117,6 +119,7 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 health::batch_health_check,
                 health::check_app_health,
                 health::get_health_history,
+                scheduler::get_schedule,
             ],
         )
 }

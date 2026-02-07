@@ -43,6 +43,7 @@ docker compose up -d
 | `ROCKET_ADDRESS` | `0.0.0.0` | Listen address |
 | `ROCKET_PORT` | `8002` | Listen port |
 | `RATE_LIMIT_WINDOW_SECS` | `60` | Rate limit window duration in seconds |
+| `HEALTH_CHECK_INTERVAL_SECS` | `300` | Scheduled health check interval (0 to disable) |
 
 ## API Reference
 
@@ -76,6 +77,7 @@ Full OpenAPI spec available at `GET /api/v1/openapi.json`.
 | `POST` | `/api/v1/apps/health-check/batch` | Batch check all apps (admin) |
 | `GET` | `/api/v1/apps/<id>/health` | Get health check history |
 | `GET` | `/api/v1/apps/health/summary` | Health overview of all apps |
+| `GET` | `/api/v1/health-check/schedule` | View scheduler config (admin) |
 
 ### Discovery
 
@@ -139,6 +141,18 @@ Health statuses:
 - **healthy** — HTTP 2xx response
 - **unhealthy** — HTTP error response (4xx/5xx)
 - **unreachable** — connection failed, timeout, or DNS error
+
+#### Scheduled Health Checks
+
+The server runs health checks automatically in the background. Configure with `HEALTH_CHECK_INTERVAL_SECS` (default: 300 = 5 minutes). Set to `0` to disable.
+
+**View scheduler status (admin):**
+```bash
+curl http://localhost:8002/api/v1/health-check/schedule \
+  -H "X-API-Key: ADMIN_KEY"
+```
+
+Scheduled checks behave identically to batch health checks: they check all approved apps with URLs, record results, update uptime percentages, and emit `health.checked` SSE events (with `"scheduled": true` in the payload). The first scheduled run begins one interval after server start.
 
 ### Webhooks
 

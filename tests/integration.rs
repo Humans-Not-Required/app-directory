@@ -1065,3 +1065,42 @@ fn test_webhook_not_found() {
         .dispatch();
     assert_eq!(response.status(), Status::NotFound);
 }
+
+#[test]
+fn test_schedule_endpoint() {
+    let (client, key) = setup_client();
+
+    // Admin can view schedule
+    let response = client
+        .get("/api/v1/health-check/schedule")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert!(body["enabled"].is_boolean());
+    assert!(body["interval_seconds"].is_number());
+    assert_eq!(body["config_var"], "HEALTH_CHECK_INTERVAL_SECS");
+    assert_eq!(body["default_interval"], 300);
+
+    // Non-admin cannot view schedule
+    let conn = rusqlite::Connection::open(std::env::var("DATABASE_PATH").unwrap()).unwrap();
+    let viewer_key = "vk_testviewerkey12345678901234";
+    let key_hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        viewer_key.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+    conn.execute(
+        "INSERT INTO api_keys (id, name, key_hash, is_admin, rate_limit) VALUES ('test-viewer', 'viewer', ?1, 0, 100)",
+        rusqlite::params![key_hash],
+    ).unwrap();
+    drop(conn);
+
+    let response = client
+        .get("/api/v1/health-check/schedule")
+        .header(Header::new("X-API-Key", viewer_key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+}
