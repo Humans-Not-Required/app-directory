@@ -164,7 +164,73 @@ pub fn init_db(path: &str) -> Connection {
     }
 
     // Migration: make submitted_by_key_id nullable for anonymous submissions
-    // SQLite doesn't support direct column modification, so this is handled in application logic
+    // SQLite doesn't support ALTER COLUMN, so we need to recreate the table if needed
+    // Check if the column is still NOT NULL by trying to insert a null value
+    let is_nullable = conn.execute(
+        "INSERT INTO apps (id, name, slug, short_description, description, author_name, protocol, category, submitted_by_key_id) VALUES ('test_null_check', 'Test', 'test', 'Test', 'Test', 'Test', 'rest', 'other', NULL)",
+        [],
+    ).is_ok();
+    
+    // Clean up test row if it was inserted
+    let _ = conn.execute("DELETE FROM apps WHERE id = 'test_null_check'", []);
+
+    if !is_nullable {
+        // Need to migrate the table to make submitted_by_key_id nullable
+        println!("⚠️  Migrating apps table to make submitted_by_key_id nullable...");
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+             
+             CREATE TABLE apps_new (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL UNIQUE,
+                short_description TEXT NOT NULL,
+                description TEXT NOT NULL,
+                homepage_url TEXT,
+                api_url TEXT,
+                api_spec_url TEXT,
+                protocol TEXT NOT NULL DEFAULT 'rest',
+                category TEXT NOT NULL DEFAULT 'other',
+                tags TEXT NOT NULL DEFAULT '[]',
+                logo_url TEXT,
+                author_name TEXT NOT NULL,
+                author_url TEXT,
+                submitted_by_key_id TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                is_featured INTEGER NOT NULL DEFAULT 0,
+                is_verified INTEGER NOT NULL DEFAULT 0,
+                avg_rating REAL NOT NULL DEFAULT 0.0,
+                review_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_health_status TEXT,
+                last_checked_at TEXT,
+                uptime_pct REAL,
+                review_note TEXT,
+                reviewed_by TEXT,
+                reviewed_at TEXT,
+                deprecated_reason TEXT,
+                deprecated_by TEXT,
+                deprecated_at TEXT,
+                replacement_app_id TEXT,
+                sunset_at TEXT,
+                edit_token_hash TEXT
+             );
+             
+             INSERT INTO apps_new SELECT * FROM apps;
+             DROP TABLE apps;
+             ALTER TABLE apps_new RENAME TO apps;
+             
+             CREATE INDEX idx_apps_category ON apps(category);
+             CREATE INDEX idx_apps_protocol ON apps(protocol);
+             CREATE INDEX idx_apps_status ON apps(status);
+             CREATE INDEX idx_apps_slug ON apps(slug);
+             
+             COMMIT;",
+        )
+        .expect("Failed to migrate apps table");
+        println!("✓ Migration complete");
+    }
 
     conn
 }
