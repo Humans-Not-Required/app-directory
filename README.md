@@ -18,18 +18,34 @@ Traditional app stores are built for humans browsing with screenshots and instal
 ### Prerequisites
 
 - Rust 1.83+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- Node.js 22+ ([install](https://nodejs.org/)) — for the frontend
 
 ### Run Locally
 
 ```bash
 git clone https://github.com/Humans-Not-Required/app-directory.git
 cd app-directory
+
+# Build the frontend
+cd frontend
+npm ci && npm run build
+cd ..
+
+# Start the backend (serves API + frontend on one port)
 cargo run
 ```
 
 On first run, an admin API key is printed to stdout — **save it!**
 
+The server starts at `http://localhost:8002`:
+1. The API is available at `http://localhost:8002/api/v1/`
+2. If `frontend/dist/` exists, the dashboard is served at `http://localhost:8002`
+
+The API and frontend are served from a single port (`http://localhost:8002`). If the frontend hasn't been built, the server runs in API-only mode.
+
 ### Docker
+
+The Docker image builds both the frontend and backend in a 3-stage pipeline (Node → Rust → runtime). No local toolchain required.
 
 ```bash
 docker compose up -d
@@ -44,6 +60,7 @@ docker compose up -d
 | `ROCKET_PORT` | `8002` | Listen port |
 | `RATE_LIMIT_WINDOW_SECS` | `60` | Rate limit window duration in seconds |
 | `HEALTH_CHECK_INTERVAL_SECS` | `300` | Scheduled health check interval (0 to disable) |
+| `STATIC_DIR` | `frontend/dist` | Path to built frontend files |
 
 ## API Reference
 
@@ -341,8 +358,51 @@ When the limit is exceeded, the API returns `429 Too Many Requests`.
 
 > **Note:** Rate limit state is in-memory and resets on server restart.
 
+## Frontend Dashboard
+
+The React dashboard provides a human-friendly interface to the directory:
+
+- **Browse** — paginated app listing with category and protocol filters
+- **Search** — full-text search across names, descriptions, and tags
+- **Submit** — form for submitting new apps with all fields
+- **App detail** — reviews, stats, deprecation info, external links
+- **Admin panel** — pending app approval/rejection, health overview, batch checks
+- **Trending** — configurable time window (24h/7d/30d)
+- **Protocol colors** — visual distinction between REST, MCP, A2A, gRPC, etc.
+- **Health/badge indicators** — status badges throughout the interface
+- **Dark theme** — slate/indigo palette
+
+The dashboard connects to the API using an API key stored in `localStorage`. Enter your key on first visit.
+
+### Frontend Development
+
+```bash
+cd frontend
+npm ci
+npm run dev    # Dev server with hot reload (proxies API to :8002)
+npm run build  # Production build to dist/
+```
+
+## Backend Development
+
+```bash
+# Format
+cargo fmt
+
+# Lint (warnings = errors)
+cargo clippy --all-targets -- -D warnings
+
+# Test (single-threaded — tests share env vars)
+cargo test -- --test-threads=1
+
+# Run
+cargo run
+```
+
 ## Architecture
 
+- **Unified serving** — single Rocket binary serves both the REST API (`/api/v1/*`) and the React frontend (`/`)
+- **SPA routing** — catch-all fallback (rank 20) serves `index.html` for client-side routes
 - **Rust / Rocket 0.5** — type-safe, fast, reliable
 - **SQLite** — zero-config database, WAL mode for concurrency
 - **API key auth** — simple, agent-friendly authentication
@@ -352,6 +412,9 @@ When the limit is exceeded, the API returns `429 Too Many Requests`.
 - **Aggregate ratings** — avg_rating and review_count maintained automatically
 - **Per-key rate limiting** — in-memory fixed-window with response headers
 - **SSE real-time events** — broadcast channel with 15s heartbeat, webhooks unified via EventBus
+- **3-stage Docker build** — Node (frontend) → Rust (backend) → Debian slim (runtime)
+- **Single-threaded SQLite** via `Mutex<Connection>` — fine for moderate load
+- **Separate DB connections** for webhook delivery and scheduled health checks (no lock contention)
 
 ## License
 
