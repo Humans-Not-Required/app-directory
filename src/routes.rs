@@ -2,9 +2,14 @@ use rocket::http::Status;
 use rocket::serde::json::Json;
 use serde_json::{json, Value};
 
+use rocket::response::stream::{Event, EventStream};
+use rocket::tokio::select;
+use rocket::tokio::time::Duration;
+use rocket::Shutdown;
+
 use crate::auth::{self, AuthenticatedKey};
+use crate::events::{AppEvent, EventBus};
 use crate::models::*;
-use crate::webhooks::{self, WebhookDb, WebhookEvent};
 use crate::DbState;
 
 // === Health ===
@@ -25,6 +30,35 @@ pub fn cors_preflight(_path: std::path::PathBuf) -> Status {
     Status::NoContent
 }
 
+// === SSE Event Stream ===
+
+#[get("/events/stream")]
+pub fn event_stream(
+    _key: AuthenticatedKey,
+    bus: &rocket::State<EventBus>,
+    mut shutdown: Shutdown,
+) -> EventStream![] {
+    let mut rx = bus.subscribe();
+
+    EventStream! {
+        loop {
+            select! {
+                msg = rx.recv() => match msg {
+                    Ok(event) => {
+                        yield Event::json(&event.data).event(event.event);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        yield Event::data("events_lost").event("warning".to_string());
+                    }
+                },
+                _ = &mut shutdown => break,
+            }
+        }
+    }
+    .heartbeat(Duration::from_secs(15))
+}
+
 // === OpenAPI Spec ===
 
 #[get("/openapi.json")]
@@ -43,8 +77,7 @@ pub fn submit_app(
     key: AuthenticatedKey,
     body: Json<SubmitAppRequest>,
     db: &rocket::State<DbState>,
-    webhook_db: &rocket::State<WebhookDb>,
-    http_client: &rocket::State<reqwest::Client>,
+    bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
     let conn = db.0.lock().unwrap();
 
@@ -118,25 +151,21 @@ pub fn submit_app(
 
     match result {
         Ok(_) => {
-            // Fire webhook: app.submitted (and app.approved if auto-approved)
+            // Fire event: app.submitted (or app.approved if auto-approved)
             let event_name = if status == "approved" {
                 "app.approved"
             } else {
                 "app.submitted"
             };
-            webhooks::deliver_webhooks(
-                (*webhook_db).clone(),
-                WebhookEvent {
-                    event: event_name.to_string(),
-                    data: json!({
-                        "app_id": id,
-                        "name": body.name,
-                        "slug": final_slug,
-                        "status": status,
-                    }),
-                },
-                (*http_client).clone(),
-            );
+            bus.emit(AppEvent {
+                event: event_name.to_string(),
+                data: json!({
+                    "app_id": id,
+                    "name": body.name,
+                    "slug": final_slug,
+                    "status": status,
+                }),
+            });
 
             (
                 Status::Created,
@@ -363,8 +392,7 @@ pub fn update_app(
     id: &str,
     body: Json<UpdateAppRequest>,
     db: &rocket::State<DbState>,
-    webhook_db: &rocket::State<WebhookDb>,
-    http_client: &rocket::State<reqwest::Client>,
+    bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
     let conn = db.0.lock().unwrap();
 
@@ -516,14 +544,10 @@ pub fn update_app(
             } else {
                 "app.updated"
             };
-            webhooks::deliver_webhooks(
-                (*webhook_db).clone(),
-                WebhookEvent {
-                    event: event_name.to_string(),
-                    data: json!({ "app_id": id }),
-                },
-                (*http_client).clone(),
-            );
+            bus.emit(AppEvent {
+                event: event_name.to_string(),
+                data: json!({ "app_id": id }),
+            });
 
             (Status::Ok, Json(json!({ "message": "App updated" })))
         }
@@ -541,8 +565,7 @@ pub fn delete_app(
     key: AuthenticatedKey,
     id: &str,
     db: &rocket::State<DbState>,
-    webhook_db: &rocket::State<WebhookDb>,
-    http_client: &rocket::State<reqwest::Client>,
+    bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
     let conn = db.0.lock().unwrap();
 
@@ -580,14 +603,10 @@ pub fn delete_app(
 
     match conn.execute("DELETE FROM apps WHERE id = ?1", rusqlite::params![id]) {
         Ok(1) => {
-            webhooks::deliver_webhooks(
-                (*webhook_db).clone(),
-                WebhookEvent {
-                    event: "app.deleted".to_string(),
-                    data: json!({ "app_id": id }),
-                },
-                (*http_client).clone(),
-            );
+            bus.emit(AppEvent {
+                event: "app.deleted".to_string(),
+                data: json!({ "app_id": id }),
+            });
             (Status::Ok, Json(json!({ "message": "App deleted" })))
         }
         Ok(_) => (
@@ -700,8 +719,7 @@ pub fn submit_review(
     app_id: &str,
     body: Json<SubmitReviewRequest>,
     db: &rocket::State<DbState>,
-    webhook_db: &rocket::State<WebhookDb>,
-    http_client: &rocket::State<reqwest::Client>,
+    bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
     let conn = db.0.lock().unwrap();
 
@@ -761,18 +779,14 @@ pub fn submit_review(
         rusqlite::params![app_id],
     );
 
-    webhooks::deliver_webhooks(
-        (*webhook_db).clone(),
-        WebhookEvent {
-            event: "review.submitted".to_string(),
-            data: json!({
-                "app_id": app_id,
-                "review_id": id,
-                "rating": body.rating,
-            }),
-        },
-        (*http_client).clone(),
-    );
+    bus.emit(AppEvent {
+        event: "review.submitted".to_string(),
+        data: json!({
+            "app_id": app_id,
+            "review_id": id,
+            "rating": body.rating,
+        }),
+    });
 
     (
         Status::Created,

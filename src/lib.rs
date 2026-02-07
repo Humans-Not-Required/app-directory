@@ -3,6 +3,7 @@ extern crate rocket;
 
 pub mod auth;
 pub mod db;
+pub mod events;
 pub mod health;
 pub mod models;
 pub mod rate_limit;
@@ -81,13 +82,12 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
         .merge(("port", port));
 
     let webhook_db = webhooks::init_webhook_db();
-    let http_client = reqwest::Client::new();
+    let event_bus = events::EventBus::with_webhooks(webhook_db);
 
     rocket::custom(figment)
         .manage(DbState(Mutex::new(conn)))
         .manage(RateLimiter::new(Duration::from_secs(window_secs)))
-        .manage(webhook_db)
-        .manage(http_client)
+        .manage(event_bus)
         .attach(Cors)
         .attach(RateLimitHeaders)
         .mount(
@@ -112,6 +112,7 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 routes::list_webhooks,
                 routes::update_webhook,
                 routes::delete_webhook,
+                routes::event_stream,
                 health::health_summary,
                 health::batch_health_check,
                 health::check_app_health,

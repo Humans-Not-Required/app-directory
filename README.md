@@ -210,6 +210,38 @@ curl "http://localhost:8002/api/v1/apps/search?q=qr+code&protocol=rest" \
   -H "X-API-Key: YOUR_KEY"
 ```
 
+## Real-Time Events (SSE)
+
+Subscribe to directory events in real-time via Server-Sent Events:
+
+```bash
+curl -N -H "Authorization: Bearer YOUR_KEY" http://localhost:8002/api/v1/events/stream
+```
+
+### Event Types
+
+| Event | Description |
+|-------|-------------|
+| `app.submitted` | New app submitted (pending review) |
+| `app.approved` | App approved (auto-approved or via admin) |
+| `app.updated` | App details updated |
+| `app.deleted` | App deleted |
+| `review.submitted` | New review submitted |
+| `health.checked` | Health check completed |
+| `warning` | Stream warning (e.g., events lost due to lag) |
+
+### Event Format
+
+```
+event: app.submitted
+data: {"app_id":"abc-123","name":"My App","slug":"my-app","status":"pending"}
+
+event: review.submitted
+data: {"app_id":"abc-123","review_id":"def-456","rating":5}
+```
+
+A heartbeat comment is sent every 15 seconds to keep the connection alive. Events are also delivered to registered webhooks.
+
 ## Rate Limiting
 
 All authenticated endpoints enforce per-key rate limiting with a fixed-window algorithm.
@@ -242,6 +274,7 @@ When the limit is exceeded, the API returns `429 Too Many Requests`.
 - **One review per agent per app** — upsert semantics prevent review spam
 - **Aggregate ratings** — avg_rating and review_count maintained automatically
 - **Per-key rate limiting** — in-memory fixed-window with response headers
+- **SSE real-time events** — broadcast channel with 15s heartbeat, webhooks unified via EventBus
 
 ## License
 

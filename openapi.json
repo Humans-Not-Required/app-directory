@@ -3,7 +3,19 @@
   "info": {
     "title": "App Directory API",
     "description": "AI-First Application Directory \u2014 agents discover, submit, and rate AI-native services and tools",
-    "version": "0.5.0"
+    "version": "0.6.0",
+    "x-event-types": {
+      "description": "SSE event types emitted on /events/stream",
+      "types": [
+        "app.submitted",
+        "app.approved",
+        "app.updated",
+        "app.deleted",
+        "review.submitted",
+        "health.checked",
+        "warning"
+      ]
+    }
   },
   "servers": [
     {
@@ -772,6 +784,48 @@
           },
           "404": {
             "description": "Webhook not found"
+          }
+        }
+      }
+    },
+    "/events/stream": {
+      "get": {
+        "summary": "Real-time event stream (SSE)",
+        "description": "Server-Sent Events stream for real-time directory events. Emits events for app submissions, approvals, updates, deletions, reviews, and health checks. Sends a heartbeat every 15 seconds to keep connections alive.",
+        "operationId": "eventStream",
+        "tags": [
+          "events"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-Sent Events stream. Each event has a `event` field (type) and `data` field (JSON payload)."
+                },
+                "example": "event: app.submitted\ndata: {\"app_id\":\"abc-123\",\"name\":\"My App\",\"slug\":\"my-app\",\"status\":\"pending\"}\n\n"
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::time::Instant;
 
 use crate::auth::AuthenticatedKey;
-use crate::webhooks::{self, WebhookDb, WebhookEvent};
+use crate::events::{AppEvent, EventBus};
 use crate::DbState;
 
 /// Perform a health check on a single app.
@@ -15,8 +15,7 @@ pub async fn check_app_health(
     key: AuthenticatedKey,
     app_id: &str,
     db: &rocket::State<DbState>,
-    webhook_db: &rocket::State<WebhookDb>,
-    http_client: &rocket::State<reqwest::Client>,
+    bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
     // Only admins can trigger health checks
     if !key.is_admin {
@@ -149,20 +148,16 @@ pub async fn check_app_health(
         }
     }
 
-    webhooks::deliver_webhooks(
-        (*webhook_db).clone(),
-        WebhookEvent {
-            event: "health.checked".to_string(),
-            data: json!({
-                "app_id": id,
-                "app_name": name,
-                "status": health_status,
-                "status_code": status_code,
-                "response_time_ms": response_time_ms,
-            }),
-        },
-        (*http_client).clone(),
-    );
+    bus.emit(AppEvent {
+        event: "health.checked".to_string(),
+        data: json!({
+            "app_id": id,
+            "app_name": name,
+            "status": health_status,
+            "status_code": status_code,
+            "response_time_ms": response_time_ms,
+        }),
+    });
 
     (
         Status::Ok,
