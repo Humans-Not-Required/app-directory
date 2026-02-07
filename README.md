@@ -83,6 +83,17 @@ Full OpenAPI spec available at `GET /api/v1/openapi.json`.
 | `POST` | `/api/v1/keys` | Create API key |
 | `DELETE` | `/api/v1/keys/<id>` | Revoke API key |
 
+### Featured & Verified Badges
+
+Admins can mark apps with trust signals:
+
+- **Featured** (`is_featured`) — highlighted app, editorially curated
+- **Verified** (`is_verified`) — confirmed working and trustworthy
+
+Set via `PATCH /api/v1/apps/<id>` with `{"is_featured": true}` or `{"is_verified": true}` (admin only).
+
+Filter by badges: `GET /api/v1/apps?featured=true` or `GET /api/v1/apps?verified=true`.
+
 ### Protocols
 
 Apps can declare their API protocol: `rest`, `graphql`, `grpc`, `mcp`, `a2a`, `websocket`, `other`

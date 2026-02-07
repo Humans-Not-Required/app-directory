@@ -431,16 +431,18 @@ fn test_rate_limiting() {
             .get("/api/v1/categories")
             .header(Header::new("X-API-Key", test_key))
             .dispatch();
-        assert_eq!(response.status(), Status::Ok, "Request {} should succeed", i + 1);
+        assert_eq!(
+            response.status(),
+            Status::Ok,
+            "Request {} should succeed",
+            i + 1
+        );
 
         // Check rate limit headers are present
         let limit = response.headers().get_one("X-RateLimit-Limit").unwrap();
         assert_eq!(limit, "3");
 
-        let remaining = response
-            .headers()
-            .get_one("X-RateLimit-Remaining")
-            .unwrap();
+        let remaining = response.headers().get_one("X-RateLimit-Remaining").unwrap();
         assert_eq!(remaining, (2 - i).to_string());
     }
 
@@ -464,6 +466,220 @@ fn test_rate_limit_headers_present() {
 
     // Rate limit headers should be present on authenticated endpoints
     assert!(response.headers().get_one("X-RateLimit-Limit").is_some());
-    assert!(response.headers().get_one("X-RateLimit-Remaining").is_some());
+    assert!(response
+        .headers()
+        .get_one("X-RateLimit-Remaining")
+        .is_some());
     assert!(response.headers().get_one("X-RateLimit-Reset").is_some());
+}
+
+#[test]
+fn test_badges_default_false() {
+    let (client, key) = setup_client();
+
+    // Submit app — badges should default to false
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Badge Test App",
+                "short_description": "Testing badges",
+                "description": "An app to test featured/verified badges",
+                "author_name": "Tester"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Get app — badges should be false
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["is_featured"], false);
+    assert_eq!(body["is_verified"], false);
+}
+
+#[test]
+fn test_admin_set_badges() {
+    let (client, key) = setup_client();
+
+    // Submit app
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Featured App",
+                "short_description": "Will be featured",
+                "description": "Admin will feature and verify this app",
+                "author_name": "Builder"
+            }"#,
+        )
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Admin sets featured badge
+    let response = client
+        .patch(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "is_featured": true, "is_verified": true }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify badges are set
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["is_featured"], true);
+    assert_eq!(body["is_verified"], true);
+
+    // Unset featured
+    let response = client
+        .patch(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "is_featured": false }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify only verified remains
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["is_featured"], false);
+    assert_eq!(body["is_verified"], true);
+}
+
+#[test]
+fn test_non_admin_cannot_set_badges() {
+    let (client, admin_key) = setup_client();
+
+    // Create a non-admin key
+    let response = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "regular-agent" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let agent_key = body["key"].as_str().unwrap().to_string();
+
+    // Submit app as regular agent
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Agent App",
+                "short_description": "Regular agent app",
+                "description": "A normal app submission",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Non-admin tries to set badges — should be forbidden
+    let response = client
+        .patch(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "is_featured": true }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+
+    // Non-admin can still update normal fields
+    let response = client
+        .patch(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", agent_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "short_description": "Updated description" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_filter_featured_apps() {
+    let (client, key) = setup_client();
+
+    // Submit 3 apps
+    let mut app_ids = Vec::new();
+    for name in &["App One", "App Two", "App Three"] {
+        let response = client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(
+                serde_json::json!({
+                    "name": name,
+                    "short_description": "Test app",
+                    "description": "Testing badge filters",
+                    "author_name": "Tester"
+                })
+                .to_string(),
+            )
+            .dispatch();
+        let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+        app_ids.push(body["id"].as_str().unwrap().to_string());
+    }
+
+    // Feature only the first app
+    client
+        .patch(format!("/api/v1/apps/{}", app_ids[0]))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "is_featured": true }"#)
+        .dispatch();
+
+    // Verify the second app
+    client
+        .patch(format!("/api/v1/apps/{}", app_ids[1]))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "is_verified": true }"#)
+        .dispatch();
+
+    // Filter by featured
+    let response = client
+        .get("/api/v1/apps?featured=true")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["name"], "App One");
+
+    // Filter by verified
+    let response = client
+        .get("/api/v1/apps?verified=true")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["items"][0]["name"], "App Two");
+
+    // No filter — all 3 apps
+    let response = client
+        .get("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 3);
 }

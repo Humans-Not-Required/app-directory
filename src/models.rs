@@ -76,6 +76,8 @@ pub struct UpdateAppRequest {
     pub author_name: Option<String>,
     pub author_url: Option<String>,
     pub status: Option<String>,
+    pub is_featured: Option<bool>,
+    pub is_verified: Option<bool>,
 }
 
 // === Review Models ===

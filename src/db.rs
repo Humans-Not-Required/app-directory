@@ -35,6 +35,8 @@ pub fn init_db(path: &str) -> Connection {
             author_url TEXT,
             submitted_by_key_id TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
+            is_featured INTEGER NOT NULL DEFAULT 0,
+            is_verified INTEGER NOT NULL DEFAULT 0,
             avg_rating REAL NOT NULL DEFAULT 0.0,
             review_count INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -63,6 +65,16 @@ pub fn init_db(path: &str) -> Connection {
         ",
     )
     .expect("Failed to initialize database");
+
+    // Migration: add badge columns if missing (for existing databases)
+    let has_featured: bool = conn.prepare("SELECT is_featured FROM apps LIMIT 0").is_ok();
+    if !has_featured {
+        conn.execute_batch(
+            "ALTER TABLE apps ADD COLUMN is_featured INTEGER NOT NULL DEFAULT 0;
+             ALTER TABLE apps ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0;",
+        )
+        .expect("Failed to add badge columns");
+    }
 
     conn
 }

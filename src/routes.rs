@@ -132,13 +132,15 @@ pub fn submit_app(
 
 // === List Apps ===
 
-#[get("/apps?<category>&<protocol>&<status>&<sort>&<page>&<per_page>")]
+#[get("/apps?<category>&<protocol>&<status>&<featured>&<verified>&<sort>&<page>&<per_page>")]
 #[allow(clippy::too_many_arguments)]
 pub fn list_apps(
     _key: AuthenticatedKey,
     category: Option<String>,
     protocol: Option<String>,
     status: Option<String>,
+    featured: Option<bool>,
+    verified: Option<bool>,
     sort: Option<String>,
     page: Option<i64>,
     per_page: Option<i64>,
@@ -170,6 +172,14 @@ pub fn list_apps(
         params.push(Box::new(proto.clone()));
     }
 
+    if let Some(true) = featured {
+        conditions.push("is_featured = 1".to_string());
+    }
+
+    if let Some(true) = verified {
+        conditions.push("is_verified = 1".to_string());
+    }
+
     let where_clause = conditions.join(" AND ");
 
     let order = match sort.as_deref() {
@@ -191,7 +201,7 @@ pub fn list_apps(
 
     // Fetch page
     let query = format!(
-        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, avg_rating, review_count, created_at, updated_at
+        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at
          FROM apps WHERE {} ORDER BY {} LIMIT ?{} OFFSET ?{}",
         where_clause,
         order,
@@ -225,10 +235,12 @@ pub fn list_apps(
                     "author_name": row.get::<_, String>(12)?,
                     "author_url": row.get::<_, Option<String>>(13)?,
                     "status": row.get::<_, String>(14)?,
-                    "avg_rating": row.get::<_, f64>(15)?,
-                    "review_count": row.get::<_, i64>(16)?,
-                    "created_at": row.get::<_, String>(17)?,
-                    "updated_at": row.get::<_, String>(18)?,
+                    "is_featured": row.get::<_, i32>(15)? != 0,
+                    "is_verified": row.get::<_, i32>(16)? != 0,
+                    "avg_rating": row.get::<_, f64>(17)?,
+                    "review_count": row.get::<_, i64>(18)?,
+                    "created_at": row.get::<_, String>(19)?,
+                    "updated_at": row.get::<_, String>(20)?,
                 }))
             },
         )
@@ -255,7 +267,7 @@ pub fn get_app(
     let conn = db.0.lock().unwrap();
 
     let result = conn.query_row(
-        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, avg_rating, review_count, created_at, updated_at
+        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at
          FROM apps WHERE id = ?1 OR slug = ?1",
         rusqlite::params![id_or_slug],
         |row| {
@@ -277,10 +289,12 @@ pub fn get_app(
                 "author_name": row.get::<_, String>(12)?,
                 "author_url": row.get::<_, Option<String>>(13)?,
                 "status": row.get::<_, String>(14)?,
-                "avg_rating": row.get::<_, f64>(15)?,
-                "review_count": row.get::<_, i64>(16)?,
-                "created_at": row.get::<_, String>(17)?,
-                "updated_at": row.get::<_, String>(18)?,
+                "is_featured": row.get::<_, i32>(15)? != 0,
+                "is_verified": row.get::<_, i32>(16)? != 0,
+                "avg_rating": row.get::<_, f64>(17)?,
+                "review_count": row.get::<_, i64>(18)?,
+                "created_at": row.get::<_, String>(19)?,
+                "updated_at": row.get::<_, String>(20)?,
             }))
         },
     );
@@ -332,11 +346,19 @@ pub fn update_app(
         );
     }
 
-    // Only admins can change status
+    // Only admins can change status or badges
     if body.status.is_some() && !key.is_admin {
         return (
             Status::Forbidden,
             Json(json!({ "error": "FORBIDDEN", "message": "Only admins can change app status" })),
+        );
+    }
+    if (body.is_featured.is_some() || body.is_verified.is_some()) && !key.is_admin {
+        return (
+            Status::Forbidden,
+            Json(
+                json!({ "error": "FORBIDDEN", "message": "Only admins can set featured/verified badges" }),
+            ),
         );
     }
 
@@ -406,6 +428,16 @@ pub fn update_app(
         let tags_json = serde_json::to_string(tags).unwrap();
         params.push(Box::new(tags_json));
         sets.push(format!("tags = ?{}", params.len()));
+    }
+
+    if let Some(featured) = body.is_featured {
+        params.push(Box::new(featured as i32));
+        sets.push(format!("is_featured = ?{}", params.len()));
+    }
+
+    if let Some(verified) = body.is_verified {
+        params.push(Box::new(verified as i32));
+        sets.push(format!("is_verified = ?{}", params.len()));
     }
 
     if sets.is_empty() {
@@ -539,7 +571,7 @@ pub fn search_apps(
         .unwrap_or(0);
 
     let query = format!(
-        "SELECT id, name, slug, short_description, protocol, category, tags, avg_rating, review_count
+        "SELECT id, name, slug, short_description, protocol, category, tags, is_featured, is_verified, avg_rating, review_count
          FROM apps WHERE {} ORDER BY avg_rating DESC, review_count DESC LIMIT ?{} OFFSET ?{}",
         where_clause,
         params.len() + 1,
@@ -563,8 +595,10 @@ pub fn search_apps(
                     "protocol": row.get::<_, String>(4)?,
                     "category": row.get::<_, String>(5)?,
                     "tags": tags,
-                    "avg_rating": row.get::<_, f64>(7)?,
-                    "review_count": row.get::<_, i64>(8)?,
+                    "is_featured": row.get::<_, i32>(7)? != 0,
+                    "is_verified": row.get::<_, i32>(8)? != 0,
+                    "avg_rating": row.get::<_, f64>(9)?,
+                    "review_count": row.get::<_, i64>(10)?,
                 }))
             },
         )
