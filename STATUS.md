@@ -1,8 +1,8 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + 29 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + 29 Tests Passing ✅
 
-Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, webhook notifications with HMAC-SHA256 signing, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
+Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
 ### What's Done
 
@@ -41,7 +41,15 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - `GET /api/v1/apps/health/summary` — Overview: counts by status + list of apps with issues
   - `GET /api/v1/apps?health=<status>` — Filter apps by health status
   - Apps include `last_health_status`, `last_checked_at`, `uptime_pct` in all responses
-- **Webhooks (NEW):**
+- **SSE Real-Time Events (NEW):**
+  - `GET /api/v1/events/stream` — Server-Sent Events stream (any authenticated key)
+  - EventBus using `tokio::sync::broadcast` channel (lazy creation)
+  - 6 event types: app.submitted, app.approved, app.updated, app.deleted, review.submitted, health.checked
+  - 15-second heartbeat to keep connections alive
+  - Graceful lagged-client handling (warning event if >256 events buffered)
+  - Unified with webhook delivery — EventBus.emit() handles both SSE broadcast and webhook dispatch
+  - No persistence — events are fire-and-forget to connected subscribers
+- **Webhooks:**
   - `POST /api/v1/webhooks` — Register webhook (admin only)
     - Custom URL + optional event filter
     - Returns HMAC secret (shown only once)
@@ -92,14 +100,15 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **rustls over OpenSSL** — no system dependency needed for TLS
 - **Uptime from last 100 checks** — rolling window prevents ancient data skewing results
 - **Separate webhook DB connection** — async delivery doesn't block main request handling
+- **Unified EventBus** — single emit point for both SSE broadcast and webhook delivery
 
 ### What's Next (Priority Order)
 
 1. ~~**Webhook notifications**~~ ✅ Done — CRUD + HMAC signatures + auto-disable
-2. **SSE real-time events** — stream for new submissions, reviews, status changes (same pattern as kanban)
+2. ~~**SSE real-time events**~~ ✅ Done — EventBus unifies SSE + webhooks, 6 event types
 3. **Scheduled health checks** — cron-based periodic checking with configurable intervals
 
-**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring, webhooks, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
+**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring, webhooks, SSE real-time events, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
 
 ### ⚠️ Gotchas
 
@@ -110,7 +119,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Search is LIKE-based (not full-text search) — adequate for moderate scale
 - No slug uniqueness guarantee across deletions
 - Rate limiter state is in-memory — resets on server restart
-- OpenAPI spec is at v0.5.0 — 14 paths, 9 schemas including webhook types
+- OpenAPI spec is at v0.6.0 — 15 paths (incl. SSE), 9 schemas including webhook types
 - Badge columns auto-migrate on existing databases
 - Health check columns auto-migrate on existing databases
 - Webhook table auto-creates (in init_db schema)
@@ -131,8 +140,10 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Health checks use `reqwest` with rustls-tls backend (no OpenSSL)
 - Batch health check acquires/releases DB lock per app (not held during HTTP)
 - Webhook delivery spawned via `tokio::spawn` — non-blocking to request handler
+- `events.rs` — EventBus with single `broadcast::Sender` (global, not per-entity like kanban)
+- SSE stream uses `rocket::response::stream::EventStream` with `tokio::select!` for graceful shutdown
 - CORS wide open (all origins)
 
 ---
 
-*Last updated: 2026-02-07 12:30 UTC — Session: Webhooks shipped (CRUD + HMAC signing + auto-disable + 4 tests)*
+*Last updated: 2026-02-07 12:40 UTC — Session: SSE real-time events shipped (EventBus unifying SSE + webhooks)*
