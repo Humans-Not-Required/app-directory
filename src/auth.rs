@@ -1,9 +1,11 @@
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
+use rocket::State;
 use rusqlite::Connection;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use crate::rate_limit::RateLimiter;
 use crate::DbState;
 
 /// Simple hash for API keys (not cryptographic — fine for this use case)
@@ -66,22 +68,54 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
             .rocket()
             .state::<DbState>()
             .expect("DB not initialized");
-        let conn = db.0.lock().expect("DB lock poisoned");
 
-        let result = conn.query_row(
-            "SELECT id, name, is_admin FROM api_keys WHERE key_hash = ?1 AND revoked = 0",
-            rusqlite::params![key_hash],
-            |row| {
-                Ok(AuthenticatedKey {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    is_admin: row.get::<_, i32>(2)? != 0,
-                })
-            },
-        );
+        // Scope the DB lock so it's dropped before any .await
+        let result = {
+            let conn = db.0.lock().expect("DB lock poisoned");
+            conn.query_row(
+                "SELECT id, name, is_admin, rate_limit FROM api_keys WHERE key_hash = ?1 AND revoked = 0",
+                rusqlite::params![key_hash],
+                |row| {
+                    Ok((
+                        AuthenticatedKey {
+                            id: row.get(0)?,
+                            name: row.get(1)?,
+                            is_admin: row.get::<_, i32>(2)? != 0,
+                        },
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+        };
 
         match result {
-            Ok(key) => Outcome::Success(key),
+            Ok((auth_key, rate_limit)) => {
+                // Get the rate limiter from Rocket state
+                let limiter = match request.guard::<&State<RateLimiter>>().await {
+                    Outcome::Success(l) => l,
+                    _ => {
+                        return Outcome::Error((
+                            Status::InternalServerError,
+                            "Rate limiter unavailable",
+                        ))
+                    }
+                };
+
+                // Enforce rate limit (per-key, fixed window)
+                let rl_result = limiter.check(&auth_key.id, rate_limit as u64);
+
+                // Store rate limit info in request-local state for response headers
+                let _ = request.local_cache(|| Some(rl_result.clone()));
+
+                if !rl_result.allowed {
+                    return Outcome::Error((
+                        Status::TooManyRequests,
+                        "Rate limit exceeded. Try again later.",
+                    ));
+                }
+
+                Outcome::Success(auth_key)
+            }
             Err(_) => Outcome::Error((Status::Unauthorized, "Invalid API key")),
         }
     }

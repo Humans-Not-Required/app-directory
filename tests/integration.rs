@@ -398,3 +398,72 @@ fn test_slugify() {
     assert_eq!(slugify("test!!!app***"), "test-app");
     assert_eq!(slugify("  spaces  everywhere  "), "spaces-everywhere");
 }
+
+#[test]
+fn test_rate_limiting() {
+    // Create a client with a low-rate-limit key
+    let db_path = format!("/tmp/test_app_dir_{}.db", uuid::Uuid::new_v4());
+    std::env::set_var("DATABASE_PATH", &db_path);
+    std::env::set_var("RATE_LIMIT_WINDOW_SECS", "60");
+
+    let rocket = app_directory::rocket();
+    let client = Client::tracked(rocket).expect("valid rocket instance");
+
+    // Create a key with rate_limit = 3
+    let test_key = "ad_ratelimitkey_test_12345678";
+    let key_hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        test_key.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    };
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute(
+        "INSERT INTO api_keys (id, name, key_hash, is_admin, rate_limit) VALUES ('rl-test', 'rate-test', ?1, 0, 3)",
+        rusqlite::params![key_hash],
+    ).unwrap();
+    drop(conn);
+
+    // First 3 requests should succeed with rate limit headers (use categories — authenticated endpoint)
+    for i in 0..3 {
+        let response = client
+            .get("/api/v1/categories")
+            .header(Header::new("X-API-Key", test_key))
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok, "Request {} should succeed", i + 1);
+
+        // Check rate limit headers are present
+        let limit = response.headers().get_one("X-RateLimit-Limit").unwrap();
+        assert_eq!(limit, "3");
+
+        let remaining = response
+            .headers()
+            .get_one("X-RateLimit-Remaining")
+            .unwrap();
+        assert_eq!(remaining, (2 - i).to_string());
+    }
+
+    // 4th request should be rate limited
+    let response = client
+        .get("/api/v1/categories")
+        .header(Header::new("X-API-Key", test_key))
+        .dispatch();
+    assert_eq!(response.status(), Status::TooManyRequests);
+}
+
+#[test]
+fn test_rate_limit_headers_present() {
+    let (client, key) = setup_client();
+
+    let response = client
+        .get("/api/v1/categories")
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Rate limit headers should be present on authenticated endpoints
+    assert!(response.headers().get_one("X-RateLimit-Limit").is_some());
+    assert!(response.headers().get_one("X-RateLimit-Remaining").is_some());
+    assert!(response.headers().get_one("X-RateLimit-Reset").is_some());
+}

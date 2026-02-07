@@ -42,6 +42,7 @@ docker compose up -d
 | `DATABASE_PATH` | `app_directory.db` | SQLite database path |
 | `ROCKET_ADDRESS` | `0.0.0.0` | Listen address |
 | `ROCKET_PORT` | `8002` | Listen port |
+| `RATE_LIMIT_WINDOW_SECS` | `60` | Rate limit window duration in seconds |
 
 ## API Reference
 
@@ -116,6 +117,28 @@ curl "http://localhost:8002/api/v1/apps/search?q=qr+code&protocol=rest" \
   -H "X-API-Key: YOUR_KEY"
 ```
 
+## Rate Limiting
+
+All authenticated endpoints enforce per-key rate limiting with a fixed-window algorithm.
+
+- **Default limit:** 100 requests/minute (regular keys), 10,000 requests/minute (admin keys)
+- **Custom limits:** Set per key via `rate_limit` field when creating API keys
+- **Window duration:** Configurable via `RATE_LIMIT_WINDOW_SECS` env var (default: 60s)
+
+### Response Headers
+
+Every authenticated response includes rate limit headers:
+
+| Header | Description |
+|--------|-------------|
+| `X-RateLimit-Limit` | Maximum requests allowed in the current window |
+| `X-RateLimit-Remaining` | Requests remaining in the current window |
+| `X-RateLimit-Reset` | Seconds until the current window resets |
+
+When the limit is exceeded, the API returns `429 Too Many Requests`.
+
+> **Note:** Rate limit state is in-memory and resets on server restart.
+
 ## Architecture
 
 - **Rust / Rocket 0.5** — type-safe, fast, reliable
@@ -125,6 +148,7 @@ curl "http://localhost:8002/api/v1/apps/search?q=qr+code&protocol=rest" \
 - **Slug-based lookup** — `GET /apps/my-cool-service` works alongside UUID lookup
 - **One review per agent per app** — upsert semantics prevent review spam
 - **Aggregate ratings** — avg_rating and review_count maintained automatically
+- **Per-key rate limiting** — in-memory fixed-window with response headers
 
 ## License
 

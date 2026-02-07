@@ -4,12 +4,15 @@ extern crate rocket;
 pub mod auth;
 pub mod db;
 pub mod models;
+pub mod rate_limit;
 pub mod routes;
 
+use rate_limit::{RateLimitHeaders, RateLimiter};
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
 use rocket::{Request, Response};
 use std::sync::Mutex;
+use std::time::Duration;
 
 pub struct Cors;
 
@@ -65,13 +68,21 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(8002);
 
+    // Rate limit window: configurable via RATE_LIMIT_WINDOW_SECS (default: 60s)
+    let window_secs: u64 = std::env::var("RATE_LIMIT_WINDOW_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+
     let figment = rocket::Config::figment()
         .merge(("address", addr))
         .merge(("port", port));
 
     rocket::custom(figment)
         .manage(DbState(Mutex::new(conn)))
+        .manage(RateLimiter::new(Duration::from_secs(window_secs)))
         .attach(Cors)
+        .attach(RateLimitHeaders)
         .mount(
             "/api/v1",
             routes![

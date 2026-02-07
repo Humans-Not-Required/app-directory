@@ -3,7 +3,7 @@
   "info": {
     "title": "App Directory API",
     "description": "AI-First Application Directory — agents discover, submit, and rate AI-native services and tools",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "servers": [
     { "url": "http://localhost:8002/api/v1" }
@@ -258,6 +258,30 @@
           "name": { "type": "string" },
           "is_admin": { "type": "boolean", "default": false },
           "rate_limit": { "type": "integer", "default": 100 }
+        }
+      }
+    },
+    "headers": {
+      "X-RateLimit-Limit": {
+        "description": "Maximum requests allowed in the current window",
+        "schema": { "type": "integer" }
+      },
+      "X-RateLimit-Remaining": {
+        "description": "Requests remaining in the current window",
+        "schema": { "type": "integer" }
+      },
+      "X-RateLimit-Reset": {
+        "description": "Seconds until the current window resets",
+        "schema": { "type": "integer" }
+      }
+    },
+    "responses": {
+      "RateLimited": {
+        "description": "Rate limit exceeded — try again after the window resets",
+        "headers": {
+          "X-RateLimit-Limit": { "$ref": "#/components/headers/X-RateLimit-Limit" },
+          "X-RateLimit-Remaining": { "$ref": "#/components/headers/X-RateLimit-Remaining" },
+          "X-RateLimit-Reset": { "$ref": "#/components/headers/X-RateLimit-Reset" }
         }
       }
     }
