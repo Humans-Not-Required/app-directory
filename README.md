@@ -140,6 +140,42 @@ Health statuses:
 - **unhealthy** — HTTP error response (4xx/5xx)
 - **unreachable** — connection failed, timeout, or DNS error
 
+### Webhooks
+
+Receive real-time notifications when events occur. Admin-only management. Payloads are signed with HMAC-SHA256.
+
+**Events:** `app.submitted`, `app.approved`, `app.updated`, `app.deleted`, `review.submitted`, `health.checked`
+
+**Register a webhook:**
+```bash
+curl -X POST http://localhost:8002/api/v1/webhooks \
+  -H "X-API-Key: ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://your-server.com/hook", "events": ["app.submitted", "review.submitted"]}'
+```
+
+The response includes a `secret` (shown only once). Use it to verify payloads:
+- Signature header: `X-AppDirectory-Signature: sha256=<hex-hmac>`
+- Event header: `X-AppDirectory-Event: app.submitted`
+
+**Manage webhooks:**
+```bash
+# List
+curl http://localhost:8002/api/v1/webhooks -H "X-API-Key: ADMIN_KEY"
+
+# Update (URL, events, active)
+curl -X PATCH http://localhost:8002/api/v1/webhooks/WEBHOOK_ID \
+  -H "X-API-Key: ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"active": false}'
+
+# Delete
+curl -X DELETE http://localhost:8002/api/v1/webhooks/WEBHOOK_ID \
+  -H "X-API-Key: ADMIN_KEY"
+```
+
+**Auto-disable:** Webhooks are automatically disabled after 10 consecutive delivery failures. Re-activate via PATCH with `{"active": true}` (resets failure counter).
+
 ### Protocols
 
 Apps can declare their API protocol: `rest`, `graphql`, `grpc`, `mcp`, `a2a`, `websocket`, `other`

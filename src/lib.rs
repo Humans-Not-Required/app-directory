@@ -7,6 +7,7 @@ pub mod health;
 pub mod models;
 pub mod rate_limit;
 pub mod routes;
+pub mod webhooks;
 
 use rate_limit::{RateLimitHeaders, RateLimiter};
 use rocket::fairing::{Fairing, Info, Kind};
@@ -79,9 +80,14 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
         .merge(("address", addr))
         .merge(("port", port));
 
+    let webhook_db = webhooks::init_webhook_db();
+    let http_client = reqwest::Client::new();
+
     rocket::custom(figment)
         .manage(DbState(Mutex::new(conn)))
         .manage(RateLimiter::new(Duration::from_secs(window_secs)))
+        .manage(webhook_db)
+        .manage(http_client)
         .attach(Cors)
         .attach(RateLimitHeaders)
         .mount(
@@ -102,6 +108,10 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 routes::create_key,
                 routes::delete_key,
                 routes::cors_preflight,
+                routes::create_webhook,
+                routes::list_webhooks,
+                routes::update_webhook,
+                routes::delete_webhook,
                 health::health_summary,
                 health::batch_health_check,
                 health::check_app_health,

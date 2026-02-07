@@ -69,6 +69,19 @@ pub fn init_db(path: &str) -> Connection {
             FOREIGN KEY (app_id) REFERENCES apps(id)
         );
 
+        CREATE TABLE IF NOT EXISTS webhooks (
+            id TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            secret TEXT NOT NULL,
+            events TEXT NOT NULL DEFAULT '[]',
+            created_by TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_triggered_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (created_by) REFERENCES api_keys(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_apps_category ON apps(category);
         CREATE INDEX IF NOT EXISTS idx_apps_protocol ON apps(protocol);
         CREATE INDEX IF NOT EXISTS idx_apps_status ON apps(status);

@@ -2,11 +2,13 @@
   "openapi": "3.0.3",
   "info": {
     "title": "App Directory API",
-    "description": "AI-First Application Directory — agents discover, submit, and rate AI-native services and tools",
-    "version": "0.4.0"
+    "description": "AI-First Application Directory \u2014 agents discover, submit, and rate AI-native services and tools",
+    "version": "0.5.0"
   },
   "servers": [
-    { "url": "http://localhost:8002/api/v1" }
+    {
+      "url": "http://localhost:8002/api/v1"
+    }
   ],
   "paths": {
     "/health": {
@@ -14,7 +16,9 @@
         "summary": "Health check",
         "operationId": "health",
         "responses": {
-          "200": { "description": "Service is healthy" }
+          "200": {
+            "description": "Service is healthy"
+          }
         }
       }
     },
@@ -23,36 +27,125 @@
         "summary": "List apps",
         "operationId": "listApps",
         "parameters": [
-          { "name": "category", "in": "query", "schema": { "type": "string" } },
-          { "name": "protocol", "in": "query", "schema": { "type": "string" } },
-          { "name": "status", "in": "query", "schema": { "type": "string", "default": "approved" } },
-          { "name": "featured", "in": "query", "schema": { "type": "boolean" }, "description": "Filter to featured apps only" },
-          { "name": "verified", "in": "query", "schema": { "type": "boolean" }, "description": "Filter to verified apps only" },
-          { "name": "health", "in": "query", "schema": { "type": "string", "enum": ["healthy", "unhealthy", "unreachable", "unknown"] }, "description": "Filter by health check status" },
-          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["newest", "rating", "name", "oldest"] } },
-          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
-          { "name": "per_page", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 } }
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "approved"
+            }
+          },
+          {
+            "name": "featured",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Filter to featured apps only"
+          },
+          {
+            "name": "verified",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Filter to verified apps only"
+          },
+          {
+            "name": "health",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "healthy",
+                "unhealthy",
+                "unreachable",
+                "unknown"
+              ]
+            },
+            "description": "Filter by health check status"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "newest",
+                "rating",
+                "name",
+                "oldest"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "Paginated list of apps" }
+          "200": {
+            "description": "Paginated list of apps"
+          }
         }
       },
       "post": {
         "summary": "Submit a new app",
         "operationId": "submitApp",
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/SubmitAppRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/SubmitAppRequest"
+              }
             }
           }
         },
         "responses": {
-          "201": { "description": "App submitted" },
-          "400": { "description": "Validation error" }
+          "201": {
+            "description": "App submitted"
+          },
+          "400": {
+            "description": "Validation error"
+          }
         }
       }
     },
@@ -61,15 +154,52 @@
         "summary": "Search apps by keyword",
         "operationId": "searchApps",
         "parameters": [
-          { "name": "q", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "category", "in": "query", "schema": { "type": "string" } },
-          { "name": "protocol", "in": "query", "schema": { "type": "string" } },
-          { "name": "page", "in": "query", "schema": { "type": "integer" } },
-          { "name": "per_page", "in": "query", "schema": { "type": "integer" } }
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "Search results" }
+          "200": {
+            "description": "Search results"
+          }
         }
       }
     },
@@ -78,41 +208,84 @@
         "summary": "Get app by ID or slug",
         "operationId": "getApp",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "App details" },
-          "404": { "description": "Not found" }
+          "200": {
+            "description": "App details"
+          },
+          "404": {
+            "description": "Not found"
+          }
         }
       },
       "patch": {
         "summary": "Update app",
         "operationId": "updateApp",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/UpdateAppRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAppRequest"
+              }
             }
           }
         },
         "responses": {
-          "200": { "description": "App updated" }
+          "200": {
+            "description": "App updated"
+          }
         }
       },
       "delete": {
         "summary": "Delete app",
         "operationId": "deleteApp",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "App deleted" }
+          "200": {
+            "description": "App deleted"
+          }
         }
       }
     },
@@ -121,32 +294,72 @@
         "summary": "Get reviews for an app",
         "operationId": "getReviews",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "page", "in": "query", "schema": { "type": "integer" } },
-          { "name": "per_page", "in": "query", "schema": { "type": "integer" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "Paginated reviews" }
+          "200": {
+            "description": "Paginated reviews"
+          }
         }
       },
       "post": {
         "summary": "Submit or update a review",
         "operationId": "submitReview",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/SubmitReviewRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/SubmitReviewRequest"
+              }
             }
           }
         },
         "responses": {
-          "201": { "description": "Review submitted" }
+          "201": {
+            "description": "Review submitted"
+          }
         }
       }
     },
@@ -154,9 +367,15 @@
       "get": {
         "summary": "List categories with app counts",
         "operationId": "listCategories",
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "Categories and valid enums" }
+          "200": {
+            "description": "Categories and valid enums"
+          }
         }
       }
     },
@@ -164,25 +383,39 @@
       "get": {
         "summary": "List API keys (admin)",
         "operationId": "listKeys",
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "API keys" }
+          "200": {
+            "description": "API keys"
+          }
         }
       },
       "post": {
         "summary": "Create API key (admin)",
         "operationId": "createKey",
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/CreateKeyRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/CreateKeyRequest"
+              }
             }
           }
         },
         "responses": {
-          "201": { "description": "Key created" }
+          "201": {
+            "description": "Key created"
+          }
         }
       }
     },
@@ -191,11 +424,24 @@
         "summary": "Revoke API key (admin)",
         "operationId": "deleteKey",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "Key revoked" }
+          "200": {
+            "description": "Key revoked"
+          }
         }
       }
     },
@@ -205,21 +451,41 @@
         "description": "Performs an HTTP GET to the app's api_url (or homepage_url) and records the result. Updates the app's cached health status and uptime percentage.",
         "operationId": "checkAppHealth",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "App ID or slug" }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "App ID or slug"
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Health check completed",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HealthCheckResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/HealthCheckResult"
+                }
               }
             }
           },
-          "403": { "description": "Admin only" },
-          "404": { "description": "App not found" },
-          "422": { "description": "App has no URL to check" }
+          "403": {
+            "description": "Admin only"
+          },
+          "404": {
+            "description": "App not found"
+          },
+          "422": {
+            "description": "App has no URL to check"
+          }
         }
       }
     },
@@ -228,17 +494,25 @@
         "summary": "Batch health check all approved apps (admin only)",
         "description": "Checks all approved apps that have an api_url or homepage_url. Returns a summary with per-app results.",
         "operationId": "batchHealthCheck",
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Batch results",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/BatchHealthCheckResult" }
+                "schema": {
+                  "$ref": "#/components/schemas/BatchHealthCheckResult"
+                }
               }
             }
           },
-          "403": { "description": "Admin only" }
+          "403": {
+            "description": "Admin only"
+          }
         }
       }
     },
@@ -247,14 +521,42 @@
         "summary": "Get health check history for an app",
         "operationId": "getHealthHistory",
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "App ID or slug" },
-          { "name": "page", "in": "query", "schema": { "type": "integer" } },
-          { "name": "per_page", "in": "query", "schema": { "type": "integer" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "App ID or slug"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "Paginated health check history with uptime percentage" },
-          "404": { "description": "App not found" }
+          "200": {
+            "description": "Paginated health check history with uptime percentage"
+          },
+          "404": {
+            "description": "App not found"
+          }
         }
       }
     },
@@ -263,9 +565,214 @@
         "summary": "Health status overview of all apps",
         "description": "Returns counts of healthy, unhealthy, and unreachable apps, plus a list of apps with issues.",
         "operationId": "healthSummary",
-        "security": [{ "apiKey": [] }],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
         "responses": {
-          "200": { "description": "Health summary" }
+          "200": {
+            "description": "Health summary"
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "post": {
+        "summary": "Register a webhook",
+        "description": "Register a new webhook to receive event notifications. Admin only. The secret is shown only once in the response.",
+        "operationId": "createWebhook",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "description": "HTTPS URL to deliver events to"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Event types to subscribe to. Empty = all events. Valid: app.submitted, app.approved, app.updated, app.deleted, review.submitted, health.checked"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookWithSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid URL or event type"
+          },
+          "403": {
+            "description": "Admin required"
+          }
+        }
+      },
+      "get": {
+        "summary": "List webhooks",
+        "description": "List all registered webhooks. Admin only. Secrets are not included.",
+        "operationId": "listWebhooks",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "webhooks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Webhook"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin required"
+          }
+        }
+      }
+    },
+    "/webhooks/{webhookId}": {
+      "patch": {
+        "summary": "Update a webhook",
+        "description": "Update webhook URL, events filter, or active status. Re-activating resets failure count. Admin only.",
+        "operationId": "updateWebhook",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  },
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated webhook",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid URL or event type"
+          },
+          "403": {
+            "description": "Admin required"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a webhook",
+        "description": "Permanently delete a webhook registration. Admin only.",
+        "operationId": "deleteWebhook",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook deleted"
+          },
+          "403": {
+            "description": "Admin required"
+          },
+          "404": {
+            "description": "Webhook not found"
+          }
         }
       }
     }
@@ -281,105 +788,349 @@
     "schemas": {
       "SubmitAppRequest": {
         "type": "object",
-        "required": ["name", "short_description", "description", "author_name"],
+        "required": [
+          "name",
+          "short_description",
+          "description",
+          "author_name"
+        ],
         "properties": {
-          "name": { "type": "string" },
-          "short_description": { "type": "string", "maxLength": 200 },
-          "description": { "type": "string" },
-          "homepage_url": { "type": "string", "format": "uri" },
-          "api_url": { "type": "string", "format": "uri" },
-          "api_spec_url": { "type": "string", "format": "uri", "description": "URL to OpenAPI/GraphQL/gRPC spec" },
-          "protocol": { "type": "string", "enum": ["rest", "graphql", "grpc", "mcp", "a2a", "websocket", "other"], "default": "rest" },
-          "category": { "type": "string", "enum": ["communication", "data", "developer-tools", "finance", "media", "productivity", "search", "security", "social", "ai-ml", "infrastructure", "other"], "default": "other" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "logo_url": { "type": "string", "format": "uri" },
-          "author_name": { "type": "string" },
-          "author_url": { "type": "string", "format": "uri" }
+          "name": {
+            "type": "string"
+          },
+          "short_description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string"
+          },
+          "homepage_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "api_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "api_spec_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL to OpenAPI/GraphQL/gRPC spec"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "rest",
+              "graphql",
+              "grpc",
+              "mcp",
+              "a2a",
+              "websocket",
+              "other"
+            ],
+            "default": "rest"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "communication",
+              "data",
+              "developer-tools",
+              "finance",
+              "media",
+              "productivity",
+              "search",
+              "security",
+              "social",
+              "ai-ml",
+              "infrastructure",
+              "other"
+            ],
+            "default": "other"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "logo_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "author_name": {
+            "type": "string"
+          },
+          "author_url": {
+            "type": "string",
+            "format": "uri"
+          }
         }
       },
       "UpdateAppRequest": {
         "type": "object",
         "properties": {
-          "name": { "type": "string" },
-          "short_description": { "type": "string" },
-          "description": { "type": "string" },
-          "homepage_url": { "type": "string" },
-          "api_url": { "type": "string" },
-          "api_spec_url": { "type": "string" },
-          "protocol": { "type": "string" },
-          "category": { "type": "string" },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "logo_url": { "type": "string" },
-          "author_name": { "type": "string" },
-          "author_url": { "type": "string" },
-          "status": { "type": "string", "enum": ["pending", "approved", "rejected", "deprecated"], "description": "Admin only" },
-          "is_featured": { "type": "boolean", "description": "Admin only — highlight app as featured" },
-          "is_verified": { "type": "boolean", "description": "Admin only — mark app as verified/trusted" }
+          "name": {
+            "type": "string"
+          },
+          "short_description": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "homepage_url": {
+            "type": "string"
+          },
+          "api_url": {
+            "type": "string"
+          },
+          "api_spec_url": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "logo_url": {
+            "type": "string"
+          },
+          "author_name": {
+            "type": "string"
+          },
+          "author_url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "deprecated"
+            ],
+            "description": "Admin only"
+          },
+          "is_featured": {
+            "type": "boolean",
+            "description": "Admin only \u2014 highlight app as featured"
+          },
+          "is_verified": {
+            "type": "boolean",
+            "description": "Admin only \u2014 mark app as verified/trusted"
+          }
         }
       },
       "SubmitReviewRequest": {
         "type": "object",
-        "required": ["rating"],
+        "required": [
+          "rating"
+        ],
         "properties": {
-          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
-          "title": { "type": "string" },
-          "body": { "type": "string" }
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
         }
       },
       "CreateKeyRequest": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "properties": {
-          "name": { "type": "string" },
-          "is_admin": { "type": "boolean", "default": false },
-          "rate_limit": { "type": "integer", "default": 100 }
+          "name": {
+            "type": "string"
+          },
+          "is_admin": {
+            "type": "boolean",
+            "default": false
+          },
+          "rate_limit": {
+            "type": "integer",
+            "default": 100
+          }
         }
       },
       "HealthCheckResult": {
         "type": "object",
         "properties": {
-          "id": { "type": "string", "format": "uuid" },
-          "app_id": { "type": "string", "format": "uuid" },
-          "app_name": { "type": "string" },
-          "checked_url": { "type": "string", "format": "uri" },
-          "status": { "type": "string", "enum": ["healthy", "unhealthy", "unreachable"] },
-          "status_code": { "type": "integer", "nullable": true },
-          "response_time_ms": { "type": "integer" },
-          "error_message": { "type": "string", "nullable": true }
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "app_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "app_name": {
+            "type": "string"
+          },
+          "checked_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "unhealthy",
+              "unreachable"
+            ]
+          },
+          "status_code": {
+            "type": "integer",
+            "nullable": true
+          },
+          "response_time_ms": {
+            "type": "integer"
+          },
+          "error_message": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "BatchHealthCheckResult": {
         "type": "object",
         "properties": {
-          "total": { "type": "integer" },
-          "healthy": { "type": "integer" },
-          "unhealthy": { "type": "integer" },
-          "unreachable": { "type": "integer" },
-          "results": { "type": "array", "items": { "$ref": "#/components/schemas/HealthCheckResult" } }
+          "total": {
+            "type": "integer"
+          },
+          "healthy": {
+            "type": "integer"
+          },
+          "unhealthy": {
+            "type": "integer"
+          },
+          "unreachable": {
+            "type": "integer"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HealthCheckResult"
+            }
+          }
+        }
+      },
+      "Webhook": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "failure_count": {
+            "type": "integer"
+          },
+          "last_triggered_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookWithSecret": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Webhook"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "HMAC secret for verifying webhook payloads. Shown only once at creation time."
+              }
+            }
+          }
+        ]
+      },
+      "WebhookPayload": {
+        "type": "object",
+        "description": "Payload delivered to webhook URLs",
+        "properties": {
+          "event": {
+            "type": "string",
+            "description": "Event type (e.g. app.submitted, review.submitted)"
+          },
+          "data": {
+            "type": "object",
+            "description": "Event-specific data"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       }
     },
     "headers": {
       "X-RateLimit-Limit": {
         "description": "Maximum requests allowed in the current window",
-        "schema": { "type": "integer" }
+        "schema": {
+          "type": "integer"
+        }
       },
       "X-RateLimit-Remaining": {
         "description": "Requests remaining in the current window",
-        "schema": { "type": "integer" }
+        "schema": {
+          "type": "integer"
+        }
       },
       "X-RateLimit-Reset": {
         "description": "Seconds until the current window resets",
-        "schema": { "type": "integer" }
+        "schema": {
+          "type": "integer"
+        }
       }
     },
     "responses": {
       "RateLimited": {
-        "description": "Rate limit exceeded — try again after the window resets",
+        "description": "Rate limit exceeded \u2014 try again after the window resets",
         "headers": {
-          "X-RateLimit-Limit": { "$ref": "#/components/headers/X-RateLimit-Limit" },
-          "X-RateLimit-Remaining": { "$ref": "#/components/headers/X-RateLimit-Remaining" },
-          "X-RateLimit-Reset": { "$ref": "#/components/headers/X-RateLimit-Reset" }
+          "X-RateLimit-Limit": {
+            "$ref": "#/components/headers/X-RateLimit-Limit"
+          },
+          "X-RateLimit-Remaining": {
+            "$ref": "#/components/headers/X-RateLimit-Remaining"
+          },
+          "X-RateLimit-Reset": {
+            "$ref": "#/components/headers/X-RateLimit-Reset"
+          }
         }
       }
     }

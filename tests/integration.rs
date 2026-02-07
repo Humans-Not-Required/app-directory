@@ -904,3 +904,164 @@ fn test_health_filter_on_list() {
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["total"], 0);
 }
+
+// === Webhook Tests ===
+
+#[test]
+fn test_webhook_crud() {
+    let (client, key) = setup_client();
+
+    // Create webhook
+    let response = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url": "https://example.com/hook", "events": ["app.submitted", "review.submitted"]}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let webhook_id = body["id"].as_str().unwrap().to_string();
+    assert!(body["secret"].as_str().unwrap().starts_with("whsec_"));
+    assert_eq!(body["active"], true);
+    assert_eq!(body["events"].as_array().unwrap().len(), 2);
+
+    // List webhooks
+    let response = client
+        .get("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["webhooks"].as_array().unwrap().len(), 1);
+    // Secret should NOT be shown in list
+    assert!(body["webhooks"][0].get("secret").is_none() || body["webhooks"][0]["secret"].is_null());
+
+    // Update webhook (change URL, deactivate)
+    let response = client
+        .patch(format!("/api/v1/webhooks/{}", webhook_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url": "https://example.com/hook2", "active": false}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["url"], "https://example.com/hook2");
+    assert_eq!(body["active"], false);
+
+    // Re-activate (resets failure count)
+    let response = client
+        .patch(format!("/api/v1/webhooks/{}", webhook_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"active": true}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["active"], true);
+    assert_eq!(body["failure_count"], 0);
+
+    // Delete webhook
+    let response = client
+        .delete(format!("/api/v1/webhooks/{}", webhook_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify deleted
+    let response = client
+        .get("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["webhooks"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_webhook_requires_admin() {
+    let (client, _admin_key) = setup_client();
+
+    // Create a non-admin key
+    let response = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", _admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name": "regular-user"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let user_key = body["key"].as_str().unwrap().to_string();
+
+    // Try to create webhook with non-admin key
+    let response = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", user_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url": "https://example.com/hook"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+
+    // Try to list webhooks with non-admin key
+    let response = client
+        .get("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", user_key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+}
+
+#[test]
+fn test_webhook_validation() {
+    let (client, key) = setup_client();
+
+    // Invalid URL (no http/https)
+    let response = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url": "ftp://example.com/hook"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"], "INVALID_URL");
+
+    // Invalid event type
+    let response = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url": "https://example.com/hook", "events": ["invalid.event"]}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"], "INVALID_EVENT");
+
+    // Empty events = subscribe to all (should succeed)
+    let response = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key))
+        .header(ContentType::JSON)
+        .body(r#"{"url": "https://example.com/hook", "events": []}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+}
+
+#[test]
+fn test_webhook_not_found() {
+    let (client, key) = setup_client();
+
+    // Update non-existent webhook
+    let response = client
+        .patch("/api/v1/webhooks/nonexistent")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"active": false}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+
+    // Delete non-existent webhook
+    let response = client
+        .delete("/api/v1/webhooks/nonexistent")
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
