@@ -1342,3 +1342,142 @@ fn test_approval_requires_admin() {
         .dispatch();
     assert_eq!(response.status(), Status::Forbidden);
 }
+
+#[test]
+fn test_app_stats() {
+    let (client, admin_key) = setup_client();
+
+    // Submit an app (auto-approved as admin)
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Stats App", "short_description": "Testing stats", "description": "Full desc", "author_name": "TestBot" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Stats should start at zero
+    let response = client
+        .get(format!("/api/v1/apps/{}/stats", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let stats: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(stats["total_views"].as_i64().unwrap(), 0);
+    assert_eq!(stats["unique_viewers"].as_i64().unwrap(), 0);
+
+    // View the app 3 times (get_app records views)
+    for _ in 0..3 {
+        let response = client
+            .get(format!("/api/v1/apps/{}", app_id))
+            .header(Header::new("X-API-Key", admin_key.clone()))
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+    }
+
+    // Now stats should show 3 views from 1 unique viewer
+    let response = client
+        .get(format!("/api/v1/apps/{}/stats", app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let stats: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(stats["total_views"].as_i64().unwrap(), 3);
+    assert_eq!(stats["views_24h"].as_i64().unwrap(), 3);
+    assert_eq!(stats["views_7d"].as_i64().unwrap(), 3);
+    assert_eq!(stats["views_30d"].as_i64().unwrap(), 3);
+    assert_eq!(stats["unique_viewers"].as_i64().unwrap(), 1);
+
+    // Stats by slug also works
+    let slug = body["slug"].as_str().unwrap();
+    let response = client
+        .get(format!("/api/v1/apps/{}/stats", slug))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let stats: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(stats["total_views"].as_i64().unwrap(), 3); // stats endpoint doesn't add views
+
+    // Stats for non-existent app returns 404
+    let response = client
+        .get("/api/v1/apps/nonexistent-id/stats")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+#[test]
+fn test_trending_apps() {
+    let (client, admin_key) = setup_client();
+
+    // Trending with no views returns empty
+    let response = client
+        .get("/api/v1/apps/trending")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["trending"].as_array().unwrap().len(), 0);
+    assert_eq!(body["period_days"].as_i64().unwrap(), 7);
+
+    // Submit two apps
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Hot App", "short_description": "Very popular", "description": "Full desc", "author_name": "TestBot" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let hot_id = body["id"].as_str().unwrap().to_string();
+
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Cold App", "short_description": "Less popular", "description": "Full desc", "author_name": "TestBot" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let cold_id = body["id"].as_str().unwrap().to_string();
+
+    // View hot app 5 times, cold app 2 times
+    for _ in 0..5 {
+        client
+            .get(format!("/api/v1/apps/{}", hot_id))
+            .header(Header::new("X-API-Key", admin_key.clone()))
+            .dispatch();
+    }
+    for _ in 0..2 {
+        client
+            .get(format!("/api/v1/apps/{}", cold_id))
+            .header(Header::new("X-API-Key", admin_key.clone()))
+            .dispatch();
+    }
+
+    // Trending should show hot app first
+    let response = client
+        .get("/api/v1/apps/trending")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let trending = body["trending"].as_array().unwrap();
+    assert_eq!(trending.len(), 2);
+    assert_eq!(trending[0]["name"].as_str().unwrap(), "Hot App");
+    assert_eq!(trending[0]["view_count"].as_i64().unwrap(), 5);
+    assert_eq!(trending[1]["name"].as_str().unwrap(), "Cold App");
+    assert_eq!(trending[1]["view_count"].as_i64().unwrap(), 2);
+
+    // Custom period and limit
+    let response = client
+        .get("/api/v1/apps/trending?days=1&limit=1")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["trending"].as_array().unwrap().len(), 1);
+    assert_eq!(body["period_days"].as_i64().unwrap(), 1);
+}

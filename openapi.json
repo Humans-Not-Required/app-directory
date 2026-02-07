@@ -3,7 +3,7 @@
   "info": {
     "title": "App Directory API",
     "description": "AI-First Application Directory \u2014 agents discover, submit, and rate AI-native services and tools",
-    "version": "0.8.0",
+    "version": "0.9.0",
     "x-event-types": {
       "description": "SSE event types emitted on /events/stream",
       "types": [
@@ -1098,6 +1098,178 @@
           },
           "409": {
             "description": "Already rejected or invalid transition"
+          }
+        }
+      }
+    },
+    "/apps/{id}/stats": {
+      "get": {
+        "summary": "Get app statistics",
+        "description": "Returns view counts (total, 24h, 7d, 30d), unique viewers for an app. Accepts app ID or slug.",
+        "operationId": "getAppStats",
+        "tags": [
+          "Statistics"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "App ID or slug",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "app_id": {
+                      "type": "string"
+                    },
+                    "total_views": {
+                      "type": "integer"
+                    },
+                    "views_24h": {
+                      "type": "integer"
+                    },
+                    "views_7d": {
+                      "type": "integer"
+                    },
+                    "views_30d": {
+                      "type": "integer"
+                    },
+                    "unique_viewers": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "App not found"
+          }
+        }
+      }
+    },
+    "/apps/trending": {
+      "get": {
+        "summary": "Trending apps",
+        "description": "Returns apps ranked by views in a given period. Shows view count, unique viewers, and views per day.",
+        "operationId": "getTrendingApps",
+        "tags": [
+          "Statistics"
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "description": "Lookback period in days (1-90, default 7)",
+            "schema": {
+              "type": "integer",
+              "default": 7,
+              "minimum": 1,
+              "maximum": 90
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Max results (1-50, default 10)",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trending apps list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "trending": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "short_description": {
+                            "type": "string"
+                          },
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "tags": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "is_featured": {
+                            "type": "boolean"
+                          },
+                          "is_verified": {
+                            "type": "boolean"
+                          },
+                          "avg_rating": {
+                            "type": "number"
+                          },
+                          "review_count": {
+                            "type": "integer"
+                          },
+                          "view_count": {
+                            "type": "integer"
+                          },
+                          "unique_viewers": {
+                            "type": "integer"
+                          },
+                          "views_per_day": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    },
+                    "period_days": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

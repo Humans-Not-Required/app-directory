@@ -336,7 +336,7 @@ pub fn list_apps(
 
 #[get("/apps/<id_or_slug>")]
 pub fn get_app(
-    _key: AuthenticatedKey,
+    key: AuthenticatedKey,
     id_or_slug: &str,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
@@ -382,7 +382,13 @@ pub fn get_app(
     );
 
     match result {
-        Ok(app) => (Status::Ok, Json(app)),
+        Ok(app) => {
+            // Record view for statistics
+            if let Some(app_id) = app.get("id").and_then(|v| v.as_str()) {
+                crate::stats::record_view(&conn, app_id, &key.id);
+            }
+            (Status::Ok, Json(app))
+        }
         Err(_) => (
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),

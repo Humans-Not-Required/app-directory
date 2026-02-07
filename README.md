@@ -100,6 +100,21 @@ State transitions:
 | `GET` | `/api/v1/apps/health/summary` | Health overview of all apps |
 | `GET` | `/api/v1/health-check/schedule` | View scheduler config (admin) |
 
+### Statistics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/apps/<id>/stats` | View counts (total, 24h, 7d, 30d) and unique viewers |
+| `GET` | `/api/v1/apps/trending` | Trending apps ranked by recent views |
+
+**View tracking:** Every `GET /api/v1/apps/<id>` request automatically records a view for statistics.
+
+**Trending parameters:**
+- `days` — lookback period (1-90, default 7)
+- `limit` — max results (1-50, default 10)
+
+Response includes `view_count`, `unique_viewers`, and `views_per_day` per app.
+
 ### Discovery
 
 | Method | Endpoint | Description |

@@ -9,6 +9,7 @@ pub mod models;
 pub mod rate_limit;
 pub mod routes;
 pub mod scheduler;
+pub mod stats;
 pub mod webhooks;
 
 use rate_limit::{RateLimitHeaders, RateLimiter};
@@ -123,6 +124,8 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 health::check_app_health,
                 health::get_health_history,
                 scheduler::get_schedule,
+                stats::get_app_stats,
+                stats::trending_apps,
             ],
         )
 }

@@ -89,6 +89,18 @@ pub fn init_db(path: &str) -> Connection {
         CREATE INDEX IF NOT EXISTS idx_reviews_app ON reviews(app_id);
         CREATE INDEX IF NOT EXISTS idx_health_checks_app ON health_checks(app_id);
         CREATE INDEX IF NOT EXISTS idx_health_checks_checked_at ON health_checks(checked_at);
+
+        CREATE TABLE IF NOT EXISTS app_views (
+            id TEXT PRIMARY KEY,
+            app_id TEXT NOT NULL,
+            viewer_key_id TEXT NOT NULL,
+            viewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (app_id) REFERENCES apps(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_views_app ON app_views(app_id);
+        CREATE INDEX IF NOT EXISTS idx_app_views_viewed_at ON app_views(viewed_at);
+        CREATE INDEX IF NOT EXISTS idx_app_views_app_viewed ON app_views(app_id, viewed_at);
         ",
     )
     .expect("Failed to initialize database");
