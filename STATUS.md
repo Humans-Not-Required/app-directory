@@ -1,8 +1,8 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + 35 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + 36 Tests Passing ✅
 
-Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, **app statistics with view tracking and trending**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
+Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, app statistics with view tracking and trending, **app deprecation workflow with replacement tracking and sunset dates**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
 ### What's Done
 
@@ -36,7 +36,22 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - Deprecated apps blocked from approve/reject
   - DB migration: auto-adds `review_note`, `reviewed_by`, `reviewed_at` columns
   - `app.rejected` added to valid webhook event types (7 total)
-- **App Statistics (NEW):**
+- **Deprecation Workflow (NEW):**
+  - `POST /api/v1/apps/{id}/deprecate` — Deprecate app (admin only)
+    - Required `reason` field (empty string rejected with 400)
+    - Optional `replacement_app_id` — validated to exist and not self-reference
+    - Optional `sunset_at` — ISO-8601 date when app stops working
+    - Emits `app.deprecated` event with full metadata
+    - Blocks on already-deprecated apps (409)
+  - `POST /api/v1/apps/{id}/undeprecate` — Restore to approved (admin only)
+    - Clears all deprecation metadata (reason, by, at, replacement, sunset)
+    - Emits `app.undeprecated` event
+    - Blocks on non-deprecated apps (409)
+  - Deprecation fields on all app responses: `deprecated_reason`, `deprecated_by`, `deprecated_at`, `replacement_app_id`, `sunset_at`
+  - DB migration: auto-adds 5 deprecation columns to existing databases
+  - `app.deprecated` and `app.undeprecated` added to valid webhook event types (9 total)
+  - Integration test covering full lifecycle (deprecate, verify, double-deprecate, approve/reject blocked, undeprecate, verify cleared)
+- **App Statistics:**
   - `GET /api/v1/apps/{id}/stats` — View counts (total, 24h, 7d, 30d) and unique viewers
     - Accepts app ID or slug (resolved to canonical ID)
     - Returns 404 for non-existent apps
@@ -110,7 +125,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
 - **Config:** Environment variables via `.env` / `dotenvy`
-- **Tests:** 35 tests passing (19 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
+- **Tests:** 36 tests passing (20 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
 - **README:** Complete with setup, API reference, approval workflow, webhooks, health monitoring, scheduled checks docs, examples
 
@@ -150,10 +165,10 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 3. ~~**Scheduled health checks**~~ ✅ Done
 4. ~~**App approval workflow**~~ ✅ Done
 5. ~~**App statistics**~~ ✅ Done — view tracking, per-app stats, trending endpoint
-6. **Frontend** — React or lightweight dashboard for human browsing
-7. **App deprecation workflow** — mark apps as deprecated with migration notes
+6. ~~**App deprecation workflow**~~ ✅ Done — deprecate/undeprecate with replacement tracking + sunset dates
+7. **Frontend** — React or lightweight dashboard for human browsing
 
-**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, app statistics with trending, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
+**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
 
 ### ⚠️ Gotchas
 
@@ -164,10 +179,11 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Search is LIKE-based (not full-text search) — adequate for moderate scale
 - No slug uniqueness guarantee across deletions
 - Rate limiter state is in-memory — resets on server restart
-- OpenAPI spec is at v0.9.0 — 21 paths, 10+ schemas including approval workflow and statistics types
+- OpenAPI spec is at v0.10.0 — 25 paths, 10+ schemas including approval, deprecation, and statistics types
 - Badge columns auto-migrate on existing databases
 - Health check columns auto-migrate on existing databases
 - Approval workflow columns auto-migrate on existing databases
+- Deprecation workflow columns auto-migrate on existing databases
 - Webhook table auto-creates (in init_db schema)
 - Health checks make outbound HTTP requests — admin-only to prevent abuse
 - Batch health check is sequential (not parallel) — safe but slower for many apps
@@ -201,4 +217,4 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 ---
 
-*Last updated: 2026-02-07 13:05 UTC — Session: App statistics shipped (view tracking + per-app stats + trending endpoint + 2 tests)*
+*Last updated: 2026-02-07 13:20 UTC — Session: Deprecation workflow shipped (deprecate/undeprecate + replacement tracking + sunset dates + 1 test)*
