@@ -1,6 +1,6 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + Frontend ✅ + Unified Serving ✅ + 36 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + Frontend ✅ + Unified Serving ✅ + README Complete ✅ + 36 Tests Passing ✅
 
 Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, app statistics with view tracking and trending, app deprecation workflow with replacement tracking and sunset dates, **React frontend with browse/search/submit/admin dashboard served from Rocket via unified serving**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
@@ -185,7 +185,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 5. ~~**App statistics**~~ ✅ Done — view tracking, per-app stats, trending endpoint
 6. ~~**App deprecation workflow**~~ ✅ Done — deprecate/undeprecate with replacement tracking + sunset dates
 7. ~~**Frontend**~~ ✅ Done — React dashboard with browse/search/submit/admin/trending + unified serving
-8. **Update README** — Document frontend, unified serving, STATIC_DIR env var
+8. ~~**Update README**~~ ✅ Done — Frontend dashboard, unified serving, STATIC_DIR, architecture, backend dev docs
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 36 tests pass.
 
@@ -236,4 +236,6 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 ---
 
-*Last updated: 2026-02-07 14:09 UTC — Session: React frontend + unified serving + 3-stage Dockerfile + clippy fixes*
+**⚡ APP-DIRECTORY IS DONE. All three HNR projects are complete and deployable.**
+
+*Last updated: 2026-02-07 14:12 UTC — Session: README update with frontend docs, unified serving, STATIC_DIR, architecture*
