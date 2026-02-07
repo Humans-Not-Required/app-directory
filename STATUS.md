@@ -1,8 +1,8 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + 30 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + 33 Tests Passing ✅
 
-Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, **scheduled background health checks**, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
+Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, **app approval workflow with dedicated approve/reject endpoints**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
 ### What's Done
 
@@ -20,7 +20,22 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - `POST /api/v1/keys` — Create API key (admin)
   - `DELETE /api/v1/keys/<id>` — Revoke key (admin)
   - `GET /api/v1/health` — Health check
-  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (v0.7.0)
+  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (v0.8.0)
+- **Approval Workflow (NEW):**
+  - `GET /api/v1/apps/pending` — List pending apps (admin only, paginated, oldest first)
+  - `POST /api/v1/apps/{id}/approve` — Approve a pending/rejected app (admin only)
+    - Optional `note` field recorded on the app
+    - Emits `app.approved` event with previous_status, reviewer, and note
+    - Blocks on already-approved or deprecated apps (409)
+  - `POST /api/v1/apps/{id}/reject` — Reject a pending/approved app (admin only)
+    - Required `reason` field (empty string rejected with 400)
+    - Emits `app.rejected` event with previous_status, reviewer, and reason
+    - Blocks on already-rejected or deprecated apps (409)
+  - Review metadata on all app responses: `review_note`, `reviewed_by`, `reviewed_at`
+  - State transitions: pending↔approved, pending→rejected, rejected→approved, approved→rejected
+  - Deprecated apps blocked from approve/reject
+  - DB migration: auto-adds `review_note`, `reviewed_by`, `reviewed_at` columns
+  - `app.rejected` added to valid webhook event types (7 total)
 - **Agent-First Features:**
   - 7 protocol types: rest, graphql, grpc, mcp, a2a, websocket, other
   - 12 categories for structured discovery
@@ -41,7 +56,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - `GET /api/v1/apps/health/summary` — Overview: counts by status + list of apps with issues
   - `GET /api/v1/apps?health=<status>` — Filter apps by health status
   - Apps include `last_health_status`, `last_checked_at`, `uptime_pct` in all responses
-- **Scheduled Health Checks (NEW):**
+- **Scheduled Health Checks:**
   - Background tokio task checks all approved apps on a configurable interval
   - Default interval: 300 seconds (5 minutes)
   - Configurable via `HEALTH_CHECK_INTERVAL_SECS` env var (0 to disable)
@@ -54,7 +69,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **SSE Real-Time Events:**
   - `GET /api/v1/events/stream` — Server-Sent Events stream (any authenticated key)
   - EventBus using `tokio::sync::broadcast` channel (lazy creation, Arc-wrapped for cloneability)
-  - 6 event types: app.submitted, app.approved, app.updated, app.deleted, review.submitted, health.checked
+  - 7 event types: app.submitted, app.approved, app.rejected, app.updated, app.deleted, review.submitted, health.checked
   - 15-second heartbeat to keep connections alive
   - Graceful lagged-client handling (warning event if >256 events buffered)
   - Unified with webhook delivery — EventBus.emit() handles both SSE broadcast and webhook dispatch
@@ -67,7 +82,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - `PATCH /api/v1/webhooks/{id}` — Update URL, events, or active status
     - Re-activating resets failure counter
   - `DELETE /api/v1/webhooks/{id}` — Delete webhook
-  - 6 event types: app.submitted, app.approved, app.updated, app.deleted, review.submitted, health.checked
+  - 7 event types: app.submitted, app.approved, app.rejected, app.updated, app.deleted, review.submitted, health.checked
   - HMAC-SHA256 payload signatures via `X-AppDirectory-Signature` header
   - Event type in `X-AppDirectory-Event` header
   - Auto-disable after 10 consecutive delivery failures
@@ -82,9 +97,9 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
 - **Config:** Environment variables via `.env` / `dotenvy`
-- **Tests:** 30 tests passing (14 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
+- **Tests:** 33 tests passing (17 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
-- **README:** Complete with setup, API reference, webhooks, health monitoring, scheduled checks docs, examples
+- **README:** Complete with setup, API reference, approval workflow, webhooks, health monitoring, scheduled checks docs, examples
 
 ### Tech Stack
 
@@ -103,6 +118,9 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Admin-only badges** — featured/verified are trust signals
 - **Admin-only health checks** — prevents abuse of outbound HTTP requests
 - **Admin-only webhooks** — global event notification system
+- **Dedicated approve/reject endpoints** — clearer than PATCH status (audit trail, required reasons)
+- **Rejection requires reason** — accountability and feedback to submitters
+- **Review metadata on app responses** — transparency about approval decisions
 - **Scheduled checks via background task** — no external cron needed
 - **Separate scheduler DB connection** — avoids lock contention, same pattern as webhooks
 - **SQLite** — same proven stack as qr-service and kanban
@@ -117,10 +135,10 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 1. ~~**Webhook notifications**~~ ✅ Done
 2. ~~**SSE real-time events**~~ ✅ Done
 3. ~~**Scheduled health checks**~~ ✅ Done
-4. **App approval workflow** — admin approve/reject with notifications
+4. ~~**App approval workflow**~~ ✅ Done
 5. **App statistics** — download counts, view counts, trending
 
-**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
+**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
 
 ### ⚠️ Gotchas
 
@@ -131,9 +149,10 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Search is LIKE-based (not full-text search) — adequate for moderate scale
 - No slug uniqueness guarantee across deletions
 - Rate limiter state is in-memory — resets on server restart
-- OpenAPI spec is at v0.7.0 — 16 paths (incl. SSE + scheduler), 9+ schemas including webhook types
+- OpenAPI spec is at v0.8.0 — 19 paths, 10+ schemas including approval workflow types
 - Badge columns auto-migrate on existing databases
 - Health check columns auto-migrate on existing databases
+- Approval workflow columns auto-migrate on existing databases
 - Webhook table auto-creates (in init_db schema)
 - Health checks make outbound HTTP requests — admin-only to prevent abuse
 - Batch health check is sequential (not parallel) — safe but slower for many apps
@@ -141,6 +160,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Scheduler opens its own DB connection on liftoff — unaffected by main DB lock contention
 - `HEALTH_CHECK_INTERVAL_SECS=0` disables scheduled checks entirely
 - First scheduled check runs after one full interval (not immediately on start)
+- `/apps/pending` route must be mounted before `/apps/<id_or_slug>` for Rocket to rank correctly
 
 ### Architecture Notes
 
@@ -164,4 +184,4 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 ---
 
-*Last updated: 2026-02-07 12:50 UTC — Session: Scheduled health checks shipped (background task + config endpoint + EventBus Arc refactor)*
+*Last updated: 2026-02-07 12:57 UTC — Session: App approval workflow shipped (approve/reject/pending + review metadata + tests)*
