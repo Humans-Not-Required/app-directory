@@ -1,0 +1,15 @@
+version: "3.8"
+services:
+  app-directory:
+    build: .
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_PATH=/data/app_directory.db
+      - ROCKET_ADDRESS=0.0.0.0
+      - ROCKET_PORT=8002
+    volumes:
+      - app-data:/data
+
+volumes:
+  app-data:
