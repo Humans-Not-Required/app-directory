@@ -81,6 +81,30 @@ State transitions:
 - `pending` → `rejected` ✅
 - `rejected` → `approved` ✅ (re-approval)
 - `approved` → `rejected` ✅ (revocation)
+- `deprecated` → approve/reject ❌ (blocked — undeprecate first)
+
+### Deprecation Workflow
+
+Mark end-of-life apps with migration guidance for agents:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/apps/<id>/deprecate` | Deprecate app with reason (admin only) |
+| `POST` | `/api/v1/apps/<id>/undeprecate` | Restore deprecated app to approved (admin only) |
+
+**Deprecate** requires a `reason`. Optionally specify:
+- `replacement_app_id` — ID of the successor app (validated to exist, cannot self-reference)
+- `sunset_at` — ISO-8601 date when the app will stop working
+
+**Undeprecate** restores the app to `approved` and clears all deprecation metadata.
+
+Deprecation fields appear on all app responses: `deprecated_reason`, `deprecated_by`, `deprecated_at`, `replacement_app_id`, `sunset_at`.
+
+Emits `app.deprecated` or `app.undeprecated` events (SSE + webhooks).
+
+State transitions:
+- any status → `deprecated` ✅
+- `deprecated` → `approved` ✅ (via undeprecate)
 - `deprecated` → approve/reject ❌ (blocked)
 
 ### Reviews
@@ -194,7 +218,7 @@ Scheduled checks behave identically to batch health checks: they check all appro
 
 Receive real-time notifications when events occur. Admin-only management. Payloads are signed with HMAC-SHA256.
 
-**Events:** `app.submitted`, `app.approved`, `app.rejected`, `app.updated`, `app.deleted`, `review.submitted`, `health.checked`
+**Events:** `app.submitted`, `app.approved`, `app.rejected`, `app.deprecated`, `app.undeprecated`, `app.updated`, `app.deleted`, `review.submitted`, `health.checked`
 
 **Register a webhook:**
 ```bash
@@ -275,6 +299,8 @@ curl -N -H "Authorization: Bearer YOUR_KEY" http://localhost:8002/api/v1/events/
 | `app.submitted` | New app submitted (pending review) |
 | `app.approved` | App approved (auto-approved or via workflow) |
 | `app.rejected` | App rejected by admin (includes reason) |
+| `app.deprecated` | App deprecated (includes reason, optional replacement + sunset) |
+| `app.undeprecated` | Deprecated app restored to approved |
 | `app.updated` | App details updated |
 | `app.deleted` | App deleted |
 | `review.submitted` | New review submitted |

@@ -1481,3 +1481,168 @@ fn test_trending_apps() {
     assert_eq!(body["trending"].as_array().unwrap().len(), 1);
     assert_eq!(body["period_days"].as_i64().unwrap(), 1);
 }
+
+#[test]
+fn test_deprecation_workflow() {
+    let (client, admin_key) = setup_client();
+
+    // Submit an app (auto-approved because admin key)
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Old Service", "short_description": "The original", "description": "Full desc of old service", "author_name": "TestBot" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let old_app_id = body["id"].as_str().unwrap().to_string();
+
+    // Submit a replacement app
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "New Service", "short_description": "The replacement", "description": "Full desc of new service", "author_name": "TestBot" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let new_app_id = body["id"].as_str().unwrap().to_string();
+
+    // Deprecate without reason → 400
+    let response = client
+        .post(format!("/api/v1/apps/{}/deprecate", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"].as_str().unwrap(), "REASON_REQUIRED");
+
+    // Deprecate with invalid replacement → 400
+    let response = client
+        .post(format!("/api/v1/apps/{}/deprecate", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{ "reason": "Replaced by newer version", "replacement_app_id": "nonexistent-id" }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"].as_str().unwrap(), "INVALID_REPLACEMENT");
+
+    // Self-replacement → 400
+    let response = client
+        .post(format!("/api/v1/apps/{}/deprecate", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(format!(
+            r#"{{ "reason": "Self-replace", "replacement_app_id": "{}" }}"#,
+            old_app_id
+        ))
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"].as_str().unwrap(), "INVALID_REPLACEMENT");
+
+    // Deprecate with valid replacement and sunset date → 200
+    let response = client
+        .post(format!("/api/v1/apps/{}/deprecate", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(format!(
+            r#"{{ "reason": "Replaced by v2", "replacement_app_id": "{}", "sunset_at": "2026-06-01T00:00:00Z" }}"#,
+            new_app_id
+        ))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["message"].as_str().unwrap(), "App deprecated");
+    assert_eq!(body["previous_status"].as_str().unwrap(), "approved");
+    assert_eq!(body["replacement_app_id"].as_str().unwrap(), new_app_id);
+
+    // Verify deprecation metadata on get_app
+    let response = client
+        .get(format!("/api/v1/apps/{}", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"].as_str().unwrap(), "deprecated");
+    assert_eq!(
+        body["deprecated_reason"].as_str().unwrap(),
+        "Replaced by v2"
+    );
+    assert_eq!(body["replacement_app_id"].as_str().unwrap(), new_app_id);
+    assert_eq!(body["sunset_at"].as_str().unwrap(), "2026-06-01T00:00:00Z");
+    assert!(body["deprecated_at"].as_str().is_some());
+    assert!(body["deprecated_by"].as_str().is_some());
+
+    // Already deprecated → 409
+    let response = client
+        .post(format!("/api/v1/apps/{}/deprecate", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "Again" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"].as_str().unwrap(), "ALREADY_DEPRECATED");
+
+    // Cannot approve deprecated app → 409
+    let response = client
+        .post(format!("/api/v1/apps/{}/approve", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "note": "Try to approve" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+
+    // Cannot reject deprecated app → 409
+    let response = client
+        .post(format!("/api/v1/apps/{}/reject", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "reason": "Try to reject" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+
+    // Undeprecate → 200 (restores to approved)
+    let response = client
+        .post(format!("/api/v1/apps/{}/undeprecate", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["message"].as_str().unwrap(), "App undeprecated");
+    assert_eq!(body["restored_to"].as_str().unwrap(), "approved");
+
+    // Verify deprecation metadata cleared
+    let response = client
+        .get(format!("/api/v1/apps/{}", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["status"].as_str().unwrap(), "approved");
+    assert!(body["deprecated_reason"].is_null());
+    assert!(body["replacement_app_id"].is_null());
+    assert!(body["sunset_at"].is_null());
+
+    // Undeprecate non-deprecated app → 409
+    let response = client
+        .post(format!("/api/v1/apps/{}/undeprecate", old_app_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"].as_str().unwrap(), "NOT_DEPRECATED");
+
+    // Undeprecate non-existent app → 404
+    let response = client
+        .post("/api/v1/apps/nonexistent-id/undeprecate")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}

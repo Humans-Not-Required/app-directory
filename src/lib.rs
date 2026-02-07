@@ -106,6 +106,8 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 routes::delete_app,
                 routes::approve_app,
                 routes::reject_app,
+                routes::deprecate_app,
+                routes::undeprecate_app,
                 routes::search_apps,
                 routes::submit_review,
                 routes::get_reviews,

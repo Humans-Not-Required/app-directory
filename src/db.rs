@@ -139,5 +139,20 @@ pub fn init_db(path: &str) -> Connection {
         .expect("Failed to add approval workflow columns");
     }
 
+    // Migration: add deprecation workflow columns if missing
+    let has_deprecated_reason: bool = conn
+        .prepare("SELECT deprecated_reason FROM apps LIMIT 0")
+        .is_ok();
+    if !has_deprecated_reason {
+        conn.execute_batch(
+            "ALTER TABLE apps ADD COLUMN deprecated_reason TEXT;
+             ALTER TABLE apps ADD COLUMN deprecated_by TEXT;
+             ALTER TABLE apps ADD COLUMN deprecated_at TEXT;
+             ALTER TABLE apps ADD COLUMN replacement_app_id TEXT;
+             ALTER TABLE apps ADD COLUMN sunset_at TEXT;",
+        )
+        .expect("Failed to add deprecation workflow columns");
+    }
+
     conn
 }
