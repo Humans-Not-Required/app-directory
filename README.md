@@ -68,12 +68,21 @@ Full OpenAPI spec available at `GET /api/v1/openapi.json`.
 | `POST` | `/api/v1/apps/<id>/reviews` | Submit/update a review (1-5 stars) |
 | `GET` | `/api/v1/apps/<id>/reviews` | Get reviews for an app |
 
+### Health Monitoring
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/apps/<id>/health-check` | Trigger health check (admin) |
+| `POST` | `/api/v1/apps/health-check/batch` | Batch check all apps (admin) |
+| `GET` | `/api/v1/apps/<id>/health` | Get health check history |
+| `GET` | `/api/v1/apps/health/summary` | Health overview of all apps |
+
 ### Discovery
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/categories` | List categories with app counts |
-| `GET` | `/api/v1/health` | Health check |
+| `GET` | `/api/v1/health` | Service health check |
 
 ### Admin
 
@@ -93,6 +102,43 @@ Admins can mark apps with trust signals:
 Set via `PATCH /api/v1/apps/<id>` with `{"is_featured": true}` or `{"is_verified": true}` (admin only).
 
 Filter by badges: `GET /api/v1/apps?featured=true` or `GET /api/v1/apps?verified=true`.
+
+### Health Monitoring
+
+Track the availability and response time of listed apps. Health checks make an HTTP GET to the app's `api_url` (or `homepage_url` as fallback).
+
+**Trigger a check (admin):**
+```bash
+curl -X POST http://localhost:8002/api/v1/apps/my-app-id/health-check \
+  -H "X-API-Key: ADMIN_KEY"
+```
+
+**Batch check all apps (admin):**
+```bash
+curl -X POST http://localhost:8002/api/v1/apps/health-check/batch \
+  -H "X-API-Key: ADMIN_KEY"
+```
+
+**View health history:**
+```bash
+curl http://localhost:8002/api/v1/apps/my-app-id/health \
+  -H "X-API-Key: YOUR_KEY"
+```
+
+**Health status overview:**
+```bash
+curl http://localhost:8002/api/v1/apps/health/summary \
+  -H "X-API-Key: YOUR_KEY"
+```
+
+**Filter apps by health status:** `GET /api/v1/apps?health=healthy` (or `unhealthy`, `unreachable`, `unknown`)
+
+Each app's response includes `last_health_status`, `last_checked_at`, and `uptime_pct` (based on last 100 checks).
+
+Health statuses:
+- **healthy** — HTTP 2xx response
+- **unhealthy** — HTTP error response (4xx/5xx)
+- **unreachable** — connection failed, timeout, or DNS error
 
 ### Protocols
 

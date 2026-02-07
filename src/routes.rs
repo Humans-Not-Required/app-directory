@@ -132,7 +132,9 @@ pub fn submit_app(
 
 // === List Apps ===
 
-#[get("/apps?<category>&<protocol>&<status>&<featured>&<verified>&<sort>&<page>&<per_page>")]
+#[get(
+    "/apps?<category>&<protocol>&<status>&<featured>&<verified>&<health>&<sort>&<page>&<per_page>"
+)]
 #[allow(clippy::too_many_arguments)]
 pub fn list_apps(
     _key: AuthenticatedKey,
@@ -141,6 +143,7 @@ pub fn list_apps(
     status: Option<String>,
     featured: Option<bool>,
     verified: Option<bool>,
+    health: Option<String>,
     sort: Option<String>,
     page: Option<i64>,
     per_page: Option<i64>,
@@ -180,6 +183,19 @@ pub fn list_apps(
         conditions.push("is_verified = 1".to_string());
     }
 
+    if let Some(ref h) = health {
+        match h.as_str() {
+            "healthy" | "unhealthy" | "unreachable" => {
+                conditions.push(format!("last_health_status = ?{}", params.len() + 1));
+                params.push(Box::new(h.clone()));
+            }
+            "unknown" => {
+                conditions.push("last_health_status IS NULL".to_string());
+            }
+            _ => {} // ignore invalid values
+        }
+    }
+
     let where_clause = conditions.join(" AND ");
 
     let order = match sort.as_deref() {
@@ -201,7 +217,7 @@ pub fn list_apps(
 
     // Fetch page
     let query = format!(
-        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at
+        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at, last_health_status, last_checked_at, uptime_pct
          FROM apps WHERE {} ORDER BY {} LIMIT ?{} OFFSET ?{}",
         where_clause,
         order,
@@ -241,6 +257,9 @@ pub fn list_apps(
                     "review_count": row.get::<_, i64>(18)?,
                     "created_at": row.get::<_, String>(19)?,
                     "updated_at": row.get::<_, String>(20)?,
+                    "last_health_status": row.get::<_, Option<String>>(21)?,
+                    "last_checked_at": row.get::<_, Option<String>>(22)?,
+                    "uptime_pct": row.get::<_, Option<f64>>(23)?,
                 }))
             },
         )
@@ -267,7 +286,7 @@ pub fn get_app(
     let conn = db.0.lock().unwrap();
 
     let result = conn.query_row(
-        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at
+        "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at, last_health_status, last_checked_at, uptime_pct
          FROM apps WHERE id = ?1 OR slug = ?1",
         rusqlite::params![id_or_slug],
         |row| {
@@ -295,6 +314,9 @@ pub fn get_app(
                 "review_count": row.get::<_, i64>(18)?,
                 "created_at": row.get::<_, String>(19)?,
                 "updated_at": row.get::<_, String>(20)?,
+                "last_health_status": row.get::<_, Option<String>>(21)?,
+                "last_checked_at": row.get::<_, Option<String>>(22)?,
+                "uptime_pct": row.get::<_, Option<f64>>(23)?,
             }))
         },
     );

@@ -3,7 +3,7 @@
   "info": {
     "title": "App Directory API",
     "description": "AI-First Application Directory — agents discover, submit, and rate AI-native services and tools",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "servers": [
     { "url": "http://localhost:8002/api/v1" }
@@ -28,6 +28,7 @@
           { "name": "status", "in": "query", "schema": { "type": "string", "default": "approved" } },
           { "name": "featured", "in": "query", "schema": { "type": "boolean" }, "description": "Filter to featured apps only" },
           { "name": "verified", "in": "query", "schema": { "type": "boolean" }, "description": "Filter to verified apps only" },
+          { "name": "health", "in": "query", "schema": { "type": "string", "enum": ["healthy", "unhealthy", "unreachable", "unknown"] }, "description": "Filter by health check status" },
           { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["newest", "rating", "name", "oldest"] } },
           { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
           { "name": "per_page", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 } }
@@ -197,6 +198,76 @@
           "200": { "description": "Key revoked" }
         }
       }
+    },
+    "/apps/{id}/health-check": {
+      "post": {
+        "summary": "Trigger health check for an app (admin only)",
+        "description": "Performs an HTTP GET to the app's api_url (or homepage_url) and records the result. Updates the app's cached health status and uptime percentage.",
+        "operationId": "checkAppHealth",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "App ID or slug" }
+        ],
+        "security": [{ "apiKey": [] }],
+        "responses": {
+          "200": {
+            "description": "Health check completed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthCheckResult" }
+              }
+            }
+          },
+          "403": { "description": "Admin only" },
+          "404": { "description": "App not found" },
+          "422": { "description": "App has no URL to check" }
+        }
+      }
+    },
+    "/apps/health-check/batch": {
+      "post": {
+        "summary": "Batch health check all approved apps (admin only)",
+        "description": "Checks all approved apps that have an api_url or homepage_url. Returns a summary with per-app results.",
+        "operationId": "batchHealthCheck",
+        "security": [{ "apiKey": [] }],
+        "responses": {
+          "200": {
+            "description": "Batch results",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BatchHealthCheckResult" }
+              }
+            }
+          },
+          "403": { "description": "Admin only" }
+        }
+      }
+    },
+    "/apps/{id}/health": {
+      "get": {
+        "summary": "Get health check history for an app",
+        "operationId": "getHealthHistory",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "App ID or slug" },
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "per_page", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "security": [{ "apiKey": [] }],
+        "responses": {
+          "200": { "description": "Paginated health check history with uptime percentage" },
+          "404": { "description": "App not found" }
+        }
+      }
+    },
+    "/apps/health/summary": {
+      "get": {
+        "summary": "Health status overview of all apps",
+        "description": "Returns counts of healthy, unhealthy, and unreachable apps, plus a list of apps with issues.",
+        "operationId": "healthSummary",
+        "security": [{ "apiKey": [] }],
+        "responses": {
+          "200": { "description": "Health summary" }
+        }
+      }
     }
   },
   "components": {
@@ -262,6 +333,29 @@
           "name": { "type": "string" },
           "is_admin": { "type": "boolean", "default": false },
           "rate_limit": { "type": "integer", "default": 100 }
+        }
+      },
+      "HealthCheckResult": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "app_id": { "type": "string", "format": "uuid" },
+          "app_name": { "type": "string" },
+          "checked_url": { "type": "string", "format": "uri" },
+          "status": { "type": "string", "enum": ["healthy", "unhealthy", "unreachable"] },
+          "status_code": { "type": "integer", "nullable": true },
+          "response_time_ms": { "type": "integer" },
+          "error_message": { "type": "string", "nullable": true }
+        }
+      },
+      "BatchHealthCheckResult": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer" },
+          "healthy": { "type": "integer" },
+          "unhealthy": { "type": "integer" },
+          "unreachable": { "type": "integer" },
+          "results": { "type": "array", "items": { "$ref": "#/components/schemas/HealthCheckResult" } }
         }
       }
     },

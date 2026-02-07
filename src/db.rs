@@ -57,11 +57,25 @@ pub fn init_db(path: &str) -> Connection {
             UNIQUE(app_id, reviewer_key_id)
         );
 
+        CREATE TABLE IF NOT EXISTS health_checks (
+            id TEXT PRIMARY KEY,
+            app_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            status_code INTEGER,
+            response_time_ms INTEGER,
+            error_message TEXT,
+            checked_url TEXT NOT NULL,
+            checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (app_id) REFERENCES apps(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_apps_category ON apps(category);
         CREATE INDEX IF NOT EXISTS idx_apps_protocol ON apps(protocol);
         CREATE INDEX IF NOT EXISTS idx_apps_status ON apps(status);
         CREATE INDEX IF NOT EXISTS idx_apps_slug ON apps(slug);
         CREATE INDEX IF NOT EXISTS idx_reviews_app ON reviews(app_id);
+        CREATE INDEX IF NOT EXISTS idx_health_checks_app ON health_checks(app_id);
+        CREATE INDEX IF NOT EXISTS idx_health_checks_checked_at ON health_checks(checked_at);
         ",
     )
     .expect("Failed to initialize database");
@@ -74,6 +88,19 @@ pub fn init_db(path: &str) -> Connection {
              ALTER TABLE apps ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0;",
         )
         .expect("Failed to add badge columns");
+    }
+
+    // Migration: add health check columns if missing
+    let has_health: bool = conn
+        .prepare("SELECT last_health_status FROM apps LIMIT 0")
+        .is_ok();
+    if !has_health {
+        conn.execute_batch(
+            "ALTER TABLE apps ADD COLUMN last_health_status TEXT;
+             ALTER TABLE apps ADD COLUMN last_checked_at TEXT;
+             ALTER TABLE apps ADD COLUMN uptime_pct REAL;",
+        )
+        .expect("Failed to add health check columns");
     }
 
     conn

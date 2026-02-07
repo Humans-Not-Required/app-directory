@@ -3,6 +3,7 @@ extern crate rocket;
 
 pub mod auth;
 pub mod db;
+pub mod health;
 pub mod models;
 pub mod rate_limit;
 pub mod routes;
@@ -101,6 +102,10 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 routes::create_key,
                 routes::delete_key,
                 routes::cors_preflight,
+                health::health_summary,
+                health::batch_health_check,
+                health::check_app_health,
+                health::get_health_history,
             ],
         )
 }

@@ -683,3 +683,224 @@ fn test_filter_featured_apps() {
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["total"], 3);
 }
+
+// === Health Check Tests ===
+
+#[test]
+fn test_health_check_requires_admin() {
+    let (client, key) = setup_client();
+
+    // Create a non-admin key
+    let response = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "agent-key" }"#)
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let agent_key = body["key"].as_str().unwrap().to_string();
+
+    // Submit an app with a URL
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Health Test App",
+                "short_description": "For health check testing",
+                "description": "Testing health checks",
+                "api_url": "https://httpbin.org/status/200",
+                "author_name": "Tester"
+            }"#,
+        )
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Non-admin should be forbidden
+    let response = client
+        .post(format!("/api/v1/apps/{}/health-check", app_id))
+        .header(Header::new("X-API-Key", agent_key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+}
+
+#[test]
+fn test_health_check_no_url() {
+    let (client, key) = setup_client();
+
+    // Submit an app WITHOUT any URL
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "No URL App",
+                "short_description": "Has no URL",
+                "description": "Testing health check with no URL",
+                "author_name": "Tester"
+            }"#,
+        )
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Health check should return 422 (no URL to check)
+    let response = client
+        .post(format!("/api/v1/apps/{}/health-check", app_id))
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"], "NO_URL");
+}
+
+#[test]
+fn test_health_check_not_found() {
+    let (client, key) = setup_client();
+
+    let response = client
+        .post("/api/v1/apps/nonexistent-id/health-check")
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+#[test]
+fn test_health_history_empty() {
+    let (client, key) = setup_client();
+
+    // Submit an app
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "History App",
+                "short_description": "For health history testing",
+                "description": "Testing health history",
+                "api_url": "https://example.com",
+                "author_name": "Tester"
+            }"#,
+        )
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Health history should be empty
+    let response = client
+        .get(format!("/api/v1/apps/{}/health", app_id))
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 0);
+    assert_eq!(body["checks"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_health_summary() {
+    let (client, key) = setup_client();
+
+    // Health summary with no apps
+    let response = client
+        .get("/api/v1/apps/health/summary")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total_approved_apps"], 0);
+    assert_eq!(body["monitored"], 0);
+    assert_eq!(body["healthy"], 0);
+    assert_eq!(body["issues"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_app_includes_health_fields() {
+    let (client, key) = setup_client();
+
+    // Submit an app
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Fields App",
+                "short_description": "Check health fields in response",
+                "description": "Testing that health fields appear",
+                "author_name": "Tester"
+            }"#,
+        )
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["id"].as_str().unwrap().to_string();
+
+    // Get app — should include health fields (null by default)
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert!(body.get("last_health_status").is_some());
+    assert!(body.get("last_checked_at").is_some());
+    assert!(body.get("uptime_pct").is_some());
+    // Should be null initially
+    assert!(body["last_health_status"].is_null());
+    assert!(body["last_checked_at"].is_null());
+
+    // List apps — should include health fields
+    let response = client
+        .get("/api/v1/apps")
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let first_app = &body["items"][0];
+    assert!(first_app.get("last_health_status").is_some());
+    assert!(first_app.get("last_checked_at").is_some());
+    assert!(first_app.get("uptime_pct").is_some());
+}
+
+#[test]
+fn test_health_filter_on_list() {
+    let (client, key) = setup_client();
+
+    // Submit an app
+    let response = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Unmonitored App",
+                "short_description": "No health checks yet",
+                "description": "Testing health filter",
+                "author_name": "Tester"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+
+    // Filter by health=unknown (no checks yet) — should find the app
+    let response = client
+        .get("/api/v1/apps?health=unknown")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+
+    // Filter by health=healthy — should find nothing
+    let response = client
+        .get("/api/v1/apps?health=healthy")
+        .header(Header::new("X-API-Key", key))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 0);
+}
