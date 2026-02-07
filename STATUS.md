@@ -1,8 +1,8 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + 33 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + 35 Tests Passing ✅
 
-Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, **app approval workflow with dedicated approve/reject endpoints**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
+Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, **app statistics with view tracking and trending**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
 ### What's Done
 
@@ -36,6 +36,19 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - Deprecated apps blocked from approve/reject
   - DB migration: auto-adds `review_note`, `reviewed_by`, `reviewed_at` columns
   - `app.rejected` added to valid webhook event types (7 total)
+- **App Statistics (NEW):**
+  - `GET /api/v1/apps/{id}/stats` — View counts (total, 24h, 7d, 30d) and unique viewers
+    - Accepts app ID or slug (resolved to canonical ID)
+    - Returns 404 for non-existent apps
+  - `GET /api/v1/apps/trending` — Trending apps ranked by recent views
+    - Configurable `days` period (1-90, default 7)
+    - Configurable `limit` (1-50, default 10)
+    - Returns view_count, unique_viewers, views_per_day per app
+    - Only includes approved apps with at least 1 view
+  - Automatic view tracking: every `GET /apps/{id}` records a view event
+  - `app_views` table with app_id, viewer_key_id, viewed_at
+  - Indexes on app_id, viewed_at, and composite (app_id, viewed_at) for efficient queries
+  - 2 integration tests (test_app_stats, test_trending_apps)
 - **Agent-First Features:**
   - 7 protocol types: rest, graphql, grpc, mcp, a2a, websocket, other
   - 12 categories for structured discovery
@@ -97,7 +110,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
 - **Config:** Environment variables via `.env` / `dotenvy`
-- **Tests:** 33 tests passing (17 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
+- **Tests:** 35 tests passing (19 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
 - **README:** Complete with setup, API reference, approval workflow, webhooks, health monitoring, scheduled checks docs, examples
 
@@ -136,9 +149,11 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 2. ~~**SSE real-time events**~~ ✅ Done
 3. ~~**Scheduled health checks**~~ ✅ Done
 4. ~~**App approval workflow**~~ ✅ Done
-5. **App statistics** — download counts, view counts, trending
+5. ~~**App statistics**~~ ✅ Done — view tracking, per-app stats, trending endpoint
+6. **Frontend** — React or lightweight dashboard for human browsing
+7. **App deprecation workflow** — mark apps as deprecated with migration notes
 
-**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
+**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, app statistics with trending, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
 
 ### ⚠️ Gotchas
 
@@ -149,7 +164,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Search is LIKE-based (not full-text search) — adequate for moderate scale
 - No slug uniqueness guarantee across deletions
 - Rate limiter state is in-memory — resets on server restart
-- OpenAPI spec is at v0.8.0 — 19 paths, 10+ schemas including approval workflow types
+- OpenAPI spec is at v0.9.0 — 21 paths, 10+ schemas including approval workflow and statistics types
 - Badge columns auto-migrate on existing databases
 - Health check columns auto-migrate on existing databases
 - Approval workflow columns auto-migrate on existing databases
@@ -161,6 +176,8 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - `HEALTH_CHECK_INTERVAL_SECS=0` disables scheduled checks entirely
 - First scheduled check runs after one full interval (not immediately on start)
 - `/apps/pending` route must be mounted before `/apps/<id_or_slug>` for Rocket to rank correctly
+- View tracking records every GET /apps/{id} request — no deduplication per session (agent views count repeatedly)
+- `app_views` table grows unbounded — consider periodic cleanup for long-running instances
 
 ### Architecture Notes
 
@@ -184,4 +201,4 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 ---
 
-*Last updated: 2026-02-07 12:57 UTC — Session: App approval workflow shipped (approve/reject/pending + review metadata + tests)*
+*Last updated: 2026-02-07 13:05 UTC — Session: App statistics shipped (view tracking + per-app stats + trending endpoint + 2 tests)*
