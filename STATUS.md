@@ -1,14 +1,14 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + 17 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + 18 Tests Passing ✅
 
-Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
+Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
 ### What's Done
 
 - **Core API** (all routes implemented):
   - `POST /api/v1/apps` — Submit app with name, description, protocol, category, tags, URLs
-  - `GET /api/v1/apps` — List apps (paginated, filterable by category/protocol/status, sortable)
+  - `GET /api/v1/apps` — List apps (paginated, filterable by category/protocol/status/featured/verified, sortable)
   - `GET /api/v1/apps/search?q=<query>` — Full-text search across name, description, tags
   - `GET /api/v1/apps/<id_or_slug>` — Get by UUID or URL slug
   - `PATCH /api/v1/apps/<id>` — Update (owner or admin only)
@@ -20,7 +20,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - `POST /api/v1/keys` — Create API key (admin)
   - `DELETE /api/v1/keys/<id>` — Revoke key (admin)
   - `GET /api/v1/health` — Health check
-  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (v0.2.0)
+  - `GET /api/v1/openapi.json` — OpenAPI 3.0 spec (v0.3.0)
 - **Agent-First Features:**
   - 7 protocol types: rest, graphql, grpc, mcp, a2a, websocket, other
   - 12 categories for structured discovery
@@ -29,6 +29,14 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
   - Auto-approval for admin submissions
   - One review per agent per app (upsert, prevents spam)
   - Automatic aggregate rating computation
+- **Featured/Verified Badges (NEW):**
+  - `is_featured` and `is_verified` boolean fields on apps (default: false)
+  - Admin-only: only admin API keys can set/unset badges via PATCH
+  - Non-admin attempts return 403 Forbidden
+  - Filter support: `GET /apps?featured=true` and `GET /apps?verified=true`
+  - Badges included in all app responses (list, get, search)
+  - DB migration: auto-adds columns to existing databases
+  - Trust signals for agents to prioritize high-quality listings
 - **Rate Limiting:**
   - Fixed-window per-key enforcement via in-memory rate limiter
   - Each API key has a configurable `rate_limit` (requests per window)
@@ -45,9 +53,9 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (multi-stage build) + docker-compose.yml
 - **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT, RATE_LIMIT_WINDOW_SECS)
-- **Tests:** 17 tests passing (14 integration + 3 rate limiter unit)
+- **Tests:** 18 tests passing (14 integration + 4 badge tests)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
-- **README:** Complete with setup instructions, API reference, rate limiting docs, examples
+- **README:** Complete with setup instructions, API reference, badge docs, rate limiting docs, examples
 
 ### Tech Stack
 
@@ -61,6 +69,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Slug + UUID lookup** — `GET /apps/my-cool-service` AND `GET /apps/<uuid>` both work
 - **Auto-approve admin submissions** — remove friction for trusted keys
 - **Upsert reviews** — one review per key per app, update by resubmitting
+- **Admin-only badges** — featured/verified are trust signals, not self-assignable
 - **SQLite** — same proven stack as qr-service and kanban
 - **Port 8002** — avoids conflicts with qr-service (8000) and kanban (8001)
 - **In-memory rate limiter** — no DB overhead per request; resets on restart (acceptable trade-off)
@@ -69,11 +78,10 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 ### What's Next (Priority Order)
 
 1. **Health check integration** — periodic endpoint testing for listed apps
-2. **Featured/verified badges** — trust signals for high-quality listings
-3. **Webhook notifications** — notify app owners when reviews are posted
-4. **SSE real-time events** — stream for new submissions, reviews, status changes (same pattern as kanban)
+2. **Webhook notifications** — notify app owners when reviews are posted
+3. **SSE real-time events** — stream for new submissions, reviews, status changes (same pattern as kanban)
 
-**Consider deployable?** Core API works end-to-end: submit, discover, search, review, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
+**Consider deployable?** Core API works end-to-end: submit, discover, search, review, badges, rate limiting with headers. README has setup instructions. Tests pass. Docker support included. This is deployable — remaining items are enhancements.
 
 ### ⚠️ Gotchas
 
@@ -84,7 +92,8 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Search is LIKE-based (not full-text search) — adequate for moderate scale
 - No slug uniqueness guarantee across deletions (slug collision appends UUID prefix)
 - Rate limiter state is in-memory — resets on server restart
-- OpenAPI spec is at v0.2.0 — rate limit headers and 429 response documented
+- OpenAPI spec is at v0.3.0 — badge fields and filter params documented
+- Badge columns auto-migrate on existing databases (safe ALTER TABLE ADD COLUMN)
 
 ### Architecture Notes
 
@@ -96,7 +105,8 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - Rate limit headers via Rocket fairing reading request-local state from auth guard
 - DB lock scoped carefully in auth guard to avoid Send issues across `.await` boundaries
 - CORS wide open (all origins)
+- Badge migration uses `prepare()` probe to detect missing columns (safe, no-op on fresh DBs)
 
 ---
 
-*Last updated: 2026-02-07 10:45 UTC — Session: Rate limiting with response headers*
+*Last updated: 2026-02-07 10:50 UTC — Session: Featured/verified badges*
