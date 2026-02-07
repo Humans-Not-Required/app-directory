@@ -2,7 +2,7 @@ use rocket::http::Status;
 use rocket::serde::json::Json;
 use serde_json::{json, Value};
 
-use crate::auth::AuthenticatedKey;
+// Auth not required for stats endpoints
 use crate::DbState;
 
 /// Record a view event for an app.
@@ -19,7 +19,6 @@ pub fn record_view(conn: &rusqlite::Connection, app_id: &str, viewer_key_id: &st
 /// Returns total views, views in last 24h, 7d, 30d, and unique viewers.
 #[get("/apps/<id>/stats")]
 pub fn get_app_stats(
-    _key: AuthenticatedKey,
     id: &str,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
@@ -108,7 +107,6 @@ pub fn get_app_stats(
 /// Returns apps with their view counts and velocity (views per day).
 #[get("/apps/trending?<days>&<limit>")]
 pub fn trending_apps(
-    _key: AuthenticatedKey,
     days: Option<i64>,
     limit: Option<i64>,
     db: &rocket::State<DbState>,

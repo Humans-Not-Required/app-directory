@@ -7,7 +7,7 @@ use rocket::tokio::select;
 use rocket::tokio::time::Duration;
 use rocket::Shutdown;
 
-use crate::auth::{self, AuthenticatedKey, OptionalKey};
+use crate::auth::{self, AuthenticatedKey};
 use crate::events::{AppEvent, EventBus};
 use crate::models::*;
 use crate::DbState;
@@ -70,11 +70,11 @@ pub fn openapi() -> (Status, (rocket::http::ContentType, String)) {
     )
 }
 
-// === App Submission (NO AUTH REQUIRED) ===
+// === App Submission ===
 
 #[post("/apps", data = "<body>")]
 pub fn submit_app(
-    opt_key: OptionalKey,
+    key: AuthenticatedKey,
     body: Json<SubmitAppRequest>,
     db: &rocket::State<DbState>,
     bus: &rocket::State<EventBus>,
@@ -123,20 +123,12 @@ pub fn submit_app(
         slug
     };
 
-    // Generate edit token for this specific app
-    let edit_token = format!("ad_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
-    let edit_token_hash = auth::hash_key(&edit_token);
-
-    // Determine status and key association
-    let (status, submitted_by_key_id) = match &opt_key.0 {
-        Some(key) if key.is_admin => ("approved", Some(key.id.clone())),
-        Some(key) => ("approved", Some(key.id.clone())),  // All submissions go live immediately
-        None => ("approved", None),  // Anonymous submissions also go live immediately
-    };
+    // Auto-approve for admin keys, otherwise pending
+    let status = if key.is_admin { "approved" } else { "pending" };
 
     let result = conn.execute(
-        "INSERT INTO apps (id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, submitted_by_key_id, status, edit_token_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        "INSERT INTO apps (id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, submitted_by_key_id, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         rusqlite::params![
             id,
             body.name,
@@ -152,16 +144,21 @@ pub fn submit_app(
             body.logo_url,
             body.author_name,
             body.author_url,
-            submitted_by_key_id,
+            key.id,
             status,
-            edit_token_hash,
         ],
     );
 
     match result {
         Ok(_) => {
+            // Fire event: app.submitted (or app.approved if auto-approved)
+            let event_name = if status == "approved" {
+                "app.approved"
+            } else {
+                "app.submitted"
+            };
             bus.emit(AppEvent {
-                event: "app.approved".to_string(),
+                event: event_name.to_string(),
                 data: json!({
                     "app_id": id,
                     "name": body.name,
@@ -170,19 +167,13 @@ pub fn submit_app(
                 }),
             });
 
-            let edit_url = format!("/apps/{}/edit?token={}", id, edit_token);
-            let listing_url = format!("/apps/{}", id);
-
             (
                 Status::Created,
                 Json(json!({
-                    "app_id": id,
+                    "id": id,
                     "slug": final_slug,
                     "status": status,
-                    "edit_token": edit_token,
-                    "edit_url": edit_url,
-                    "listing_url": listing_url,
-                    "message": "App listing created! Save your edit token to modify or delete this listing later."
+                    "message": if status == "approved" { "App submitted and approved" } else { "App submitted for review" }
                 })),
             )
         }
@@ -193,13 +184,14 @@ pub fn submit_app(
     }
 }
 
-// === List Apps (NO AUTH REQUIRED) ===
+// === List Apps ===
 
 #[get(
     "/apps?<category>&<protocol>&<status>&<featured>&<verified>&<health>&<sort>&<page>&<per_page>"
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn list_apps(
+    _key: AuthenticatedKey,
     category: Option<String>,
     protocol: Option<String>,
     status: Option<String>,
@@ -345,11 +337,11 @@ pub fn list_apps(
     }))
 }
 
-// === Get Single App (NO AUTH REQUIRED) ===
+// === Get Single App ===
 
 #[get("/apps/<id_or_slug>")]
 pub fn get_app(
-    opt_key: OptionalKey,
+    key: AuthenticatedKey,
     id_or_slug: &str,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
@@ -401,10 +393,9 @@ pub fn get_app(
 
     match result {
         Ok(app) => {
-            // Record view for statistics (with optional key)
+            // Record view for statistics
             if let Some(app_id) = app.get("id").and_then(|v| v.as_str()) {
-                let viewer_id = opt_key.0.as_ref().map(|k| k.id.as_str()).unwrap_or("anonymous");
-                crate::stats::record_view(&conn, app_id, viewer_id);
+                crate::stats::record_view(&conn, app_id, &key.id);
             }
             (Status::Ok, Json(app))
         }
@@ -413,47 +404,6 @@ pub fn get_app(
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
         ),
     }
-}
-
-// === List My Apps (API Key Required) ===
-
-#[get("/apps/mine")]
-pub fn list_my_apps(
-    key: AuthenticatedKey,
-    db: &rocket::State<DbState>,
-) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
-
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name, slug, short_description, status, created_at, updated_at
-             FROM apps WHERE submitted_by_key_id = ?1 ORDER BY created_at DESC",
-        )
-        .unwrap();
-
-    let apps: Vec<Value> = stmt
-        .query_map(rusqlite::params![key.id], |row| {
-            Ok(json!({
-                "id": row.get::<_, String>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "slug": row.get::<_, String>(2)?,
-                "short_description": row.get::<_, String>(3)?,
-                "status": row.get::<_, String>(4)?,
-                "created_at": row.get::<_, String>(5)?,
-                "updated_at": row.get::<_, String>(6)?,
-            }))
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect();
-
-    (
-        Status::Ok,
-        Json(json!({
-            "apps": apps,
-            "total": apps.len(),
-        })),
-    )
 }
 
 // === Update App ===
@@ -692,10 +642,11 @@ pub fn delete_app(
     }
 }
 
-// === Search (NO AUTH REQUIRED) ===
+// === Search ===
 
 #[get("/apps/search?<q>&<category>&<protocol>&<page>&<per_page>")]
 pub fn search_apps(
+    _key: AuthenticatedKey,
     q: &str,
     category: Option<String>,
     protocol: Option<String>,
@@ -782,11 +733,11 @@ pub fn search_apps(
     }))
 }
 
-// === Reviews (NO AUTH REQUIRED) ===
+// === Reviews ===
 
 #[post("/apps/<app_id>/reviews", data = "<body>")]
 pub fn submit_review(
-    opt_key: OptionalKey,
+    key: AuthenticatedKey,
     app_id: &str,
     body: Json<SubmitReviewRequest>,
     db: &rocket::State<DbState>,
@@ -820,9 +771,8 @@ pub fn submit_review(
     }
 
     let id = uuid::Uuid::new_v4().to_string();
-    let reviewer_id = opt_key.0.as_ref().map(|k| k.id.as_str()).unwrap_or("anonymous");
 
-    // Upsert review (one review per key per app, or per anonymous user)
+    // Upsert review (one review per key per app)
     let result = conn.execute(
         "INSERT INTO reviews (id, app_id, reviewer_key_id, rating, title, body)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -831,7 +781,7 @@ pub fn submit_review(
            title = excluded.title,
            body = excluded.body,
            created_at = datetime('now')",
-        rusqlite::params![id, app_id, reviewer_id, body.rating, body.title, body.body],
+        rusqlite::params![id, app_id, key.id, body.rating, body.title, body.body],
     );
 
     if let Err(e) = result {
@@ -868,6 +818,7 @@ pub fn submit_review(
 
 #[get("/apps/<app_id>/reviews?<page>&<per_page>")]
 pub fn get_reviews(
+    _key: AuthenticatedKey,
     app_id: &str,
     page: Option<i64>,
     per_page: Option<i64>,
@@ -917,10 +868,10 @@ pub fn get_reviews(
     }))
 }
 
-// === Categories (NO AUTH REQUIRED) ===
+// === Categories ===
 
 #[get("/categories")]
-pub fn list_categories(db: &rocket::State<DbState>) -> Json<Value> {
+pub fn list_categories(_key: AuthenticatedKey, db: &rocket::State<DbState>) -> Json<Value> {
     let conn = db.0.lock().unwrap();
 
     let mut stmt = conn
@@ -984,18 +935,14 @@ pub fn list_keys(key: AuthenticatedKey, db: &rocket::State<DbState>) -> (Status,
 
 #[post("/keys", data = "<body>")]
 pub fn create_key(
-    opt_key: OptionalKey,
+    key: AuthenticatedKey,
     body: Json<models::CreateKeyRequest>,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
-    // Admin keys can create admin keys, everyone else (including anonymous) can create regular keys
-    let is_admin_request = body.is_admin.unwrap_or(false);
-    let requester_is_admin = opt_key.0.as_ref().map(|k| k.is_admin).unwrap_or(false);
-
-    if is_admin_request && !requester_is_admin {
+    if !key.is_admin {
         return (
             Status::Forbidden,
-            Json(json!({ "error": "ADMIN_REQUIRED", "message": "Only admins can create admin keys" })),
+            Json(json!({ "error": "ADMIN_REQUIRED" })),
         );
     }
 
@@ -1003,14 +950,14 @@ pub fn create_key(
     let raw_key = auth::create_api_key(
         &conn,
         &body.name,
-        is_admin_request,
+        body.is_admin.unwrap_or(false),
         body.rate_limit,
     );
 
     (
         Status::Created,
         Json(json!({
-            "api_key": raw_key,
+            "key": raw_key,
             "message": "Save this key — it won't be shown again"
         })),
     )

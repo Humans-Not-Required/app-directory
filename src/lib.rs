@@ -120,6 +120,7 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 routes::list_apps,
                 routes::list_pending_apps,
                 routes::get_app,
+                routes::list_my_apps,
                 routes::update_app,
                 routes::delete_app,
                 routes::approve_app,

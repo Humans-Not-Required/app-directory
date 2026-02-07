@@ -329,7 +329,6 @@ pub async fn batch_health_check(
 /// Get health check history for an app.
 #[get("/apps/<app_id>/health?<page>&<per_page>")]
 pub fn get_health_history(
-    _key: AuthenticatedKey,
     app_id: &str,
     page: Option<i64>,
     per_page: Option<i64>,
@@ -414,7 +413,7 @@ pub fn get_health_history(
 
 /// Health summary: overview of all apps' health status.
 #[get("/apps/health/summary")]
-pub fn health_summary(_key: AuthenticatedKey, db: &rocket::State<DbState>) -> Json<Value> {
+pub fn health_summary(db: &rocket::State<DbState>) -> Json<Value> {
     let conn = db.0.lock().unwrap();
 
     // Get summary counts

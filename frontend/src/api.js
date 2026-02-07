@@ -11,7 +11,8 @@ function setKey(key) {
 async function request(path, opts = {}) {
   const key = getKey();
   const headers = { ...(opts.headers || {}) };
-  if (key) headers['Authorization'] = `Bearer ${key}`;
+  // Only add Authorization header if we have a key (not required for most endpoints now)
+  if (key && key.trim()) headers['Authorization'] = `Bearer ${key}`;
   if (opts.body && typeof opts.body === 'object') {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(opts.body);

@@ -154,5 +154,17 @@ pub fn init_db(path: &str) -> Connection {
         .expect("Failed to add deprecation workflow columns");
     }
 
+    // Migration: add edit_token_hash for per-resource auth
+    let has_edit_token: bool = conn.prepare("SELECT edit_token_hash FROM apps LIMIT 0").is_ok();
+    if !has_edit_token {
+        conn.execute_batch(
+            "ALTER TABLE apps ADD COLUMN edit_token_hash TEXT;",
+        )
+        .expect("Failed to add edit_token_hash column");
+    }
+
+    // Migration: make submitted_by_key_id nullable for anonymous submissions
+    // SQLite doesn't support direct column modification, so this is handled in application logic
+
     conn
 }

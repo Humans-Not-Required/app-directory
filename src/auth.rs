@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use crate::rate_limit::RateLimiter;
 use crate::DbState;
 
-/// Simple hash for API keys (not cryptographic — fine for this use case)
+/// Simple hash for API keys and edit tokens (not cryptographic — fine for this use case)
 pub fn hash_key(key: &str) -> String {
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
@@ -36,7 +36,7 @@ pub fn create_api_key(
     raw_key
 }
 
-/// Authenticated caller info extracted from request
+/// Authenticated caller info extracted from request (OPTIONAL for most routes now)
 #[derive(Debug)]
 pub struct AuthenticatedKey {
     pub id: String,
@@ -118,5 +118,114 @@ impl<'r> FromRequest<'r> for AuthenticatedKey {
             }
             Err(_) => Outcome::Error((Status::Unauthorized, "Invalid API key")),
         }
+    }
+}
+
+/// Optional authenticated key (allows both authenticated and anonymous requests)
+#[derive(Debug)]
+pub struct OptionalKey(pub Option<AuthenticatedKey>);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for OptionalKey {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        match request.guard::<AuthenticatedKey>().await {
+            Outcome::Success(key) => Outcome::Success(OptionalKey(Some(key))),
+            _ => Outcome::Success(OptionalKey(None)),
+        }
+    }
+}
+
+/// Edit token authorization (for editing/deleting specific apps)
+#[derive(Debug)]
+pub struct EditAuth {
+    pub app_id: String,
+    pub via: EditAuthVia,
+}
+
+#[derive(Debug)]
+pub enum EditAuthVia {
+    EditToken,
+    ApiKey(String),  // key_id
+    Admin(String),   // key_id
+}
+
+impl EditAuth {
+    /// Check if the request can edit the given app_id via:
+    /// 1. Edit token in query param or header
+    /// 2. API key that created the app
+    /// 3. Admin API key
+    pub async fn from_request_for_app(
+        request: &rocket::Request<'_>,
+        app_id: &str,
+    ) -> Result<Self, Status> {
+        let db = request
+            .rocket()
+            .state::<DbState>()
+            .ok_or(Status::InternalServerError)?;
+
+        // Try edit token first (query param or header)
+        let edit_token = request
+            .query_value::<String>("token")
+            .and_then(|r| r.ok())
+            .or_else(|| {
+                request
+                    .headers()
+                    .get_one("X-Edit-Token")
+                    .map(|s| s.to_string())
+            });
+
+        if let Some(token) = edit_token {
+            let token_hash = hash_key(&token);
+            let conn = db.0.lock().map_err(|_| Status::InternalServerError)?;
+            
+            // Check if token matches this app
+            let valid: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM apps WHERE id = ?1 AND edit_token_hash = ?2",
+                    rusqlite::params![app_id, token_hash],
+                    |r| r.get(0),
+                )
+                .unwrap_or(false);
+
+            if valid {
+                return Ok(EditAuth {
+                    app_id: app_id.to_string(),
+                    via: EditAuthVia::EditToken,
+                });
+            }
+        }
+
+        // Try API key
+        if let Outcome::Success(api_key) = request.guard::<AuthenticatedKey>().await {
+            let conn = db.0.lock().map_err(|_| Status::InternalServerError)?;
+
+            // Admin can edit anything
+            if api_key.is_admin {
+                return Ok(EditAuth {
+                    app_id: app_id.to_string(),
+                    via: EditAuthVia::Admin(api_key.id),
+                });
+            }
+
+            // Check if this API key created the app
+            let is_owner: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM apps WHERE id = ?1 AND submitted_by_key_id = ?2",
+                    rusqlite::params![app_id, api_key.id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(false);
+
+            if is_owner {
+                return Ok(EditAuth {
+                    app_id: app_id.to_string(),
+                    via: EditAuthVia::ApiKey(api_key.id),
+                });
+            }
+        }
+
+        Err(Status::Forbidden)
     }
 }

@@ -223,28 +223,61 @@ function AppDetail({ app, onBack, onRefresh }) {
 function SubmitAppForm({ categories, onSubmit, onCancel }) {
   const [form, setForm] = useState({
     name: '', description: '', url: '', api_spec_url: '', source_url: '',
-    protocol: 'rest', category: 'other', tags: '',
+    protocol: 'rest', category: 'other', tags: '', author_name: 'Anonymous',
   });
   const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState(null);
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.description.trim()) return alert('Name and description required');
     setSubmitting(true);
     try {
       const body = {
-        ...form,
+        name: form.name,
+        short_description: form.description.slice(0, 150),
+        description: form.description,
+        homepage_url: form.url || null,
+        api_spec_url: form.api_spec_url || null,
+        protocol: form.protocol,
+        category: form.category,
+        author_name: form.author_name,
         tags: form.tags ? form.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
       };
-      if (!body.url) delete body.url;
-      if (!body.api_spec_url) delete body.api_spec_url;
-      if (!body.source_url) delete body.source_url;
-      await api.submitApp(body);
-      onSubmit?.();
+      const res = await api.submitApp(body);
+      setSubmitResult(res.data);
     } catch (e) {
       alert(e.error || 'Submit failed');
     }
     setSubmitting(false);
   };
+
+  if (submitResult) {
+    return (
+      <div style={styles.card}>
+        <h3 style={{ margin: '0 0 12px', color: '#22c55e' }}>✓ App Submitted Successfully!</h3>
+        <p style={{ color: '#cbd5e1', margin: '8px 0' }}>
+          Your app has been added to the directory.
+        </p>
+        <div style={{ background: '#0f172a', padding: 12, borderRadius: 6, margin: '12px 0' }}>
+          <strong style={{ color: '#f59e0b', fontSize: 13 }}>🔑 Save Your Edit Token:</strong>
+          <div style={{ ...styles.input, marginTop: 6, fontFamily: 'monospace', fontSize: 12, userSelect: 'all' }}>
+            {submitResult.edit_token}
+          </div>
+          <p style={{ fontSize: 11, color: '#94a3b8', margin: '6px 0 0' }}>
+            You'll need this token to edit or delete your listing later. Keep it safe!
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={{ ...styles.btn, ...styles.btnPrimary }} onClick={() => window.open(submitResult.listing_url, '_self')}>
+            View Listing
+          </button>
+          <button style={styles.btnGhost} onClick={() => { setSubmitResult(null); onSubmit?.(); }}>
+            Submit Another
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -255,6 +288,10 @@ function SubmitAppForm({ categories, onSubmit, onCancel }) {
         <div>
           <label style={styles.label}>Name *</label>
           <input style={styles.input} value={form.name} onChange={set('name')} placeholder="My Cool API" />
+        </div>
+        <div>
+          <label style={styles.label}>Author Name</label>
+          <input style={styles.input} value={form.author_name} onChange={set('author_name')} placeholder="Your name or 'Anonymous'" />
         </div>
         <div>
           <label style={styles.label}>Protocol *</label>
@@ -268,7 +305,7 @@ function SubmitAppForm({ categories, onSubmit, onCancel }) {
             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div>
+        <div style={{ gridColumn: '1 / -1' }}>
           <label style={styles.label}>Tags (comma-separated)</label>
           <input style={styles.input} value={form.tags} onChange={set('tags')} placeholder="openai, llm, chat" />
         </div>
@@ -421,6 +458,7 @@ function TrendingPanel() {
 
 export default function App() {
   const [hasKey, setHasKey] = useState(!!api.getKey());
+  const [showKeyPrompt, setShowKeyPrompt] = useState(false);
   const [rateLimit, setRateLimit] = useState(null);
   const [apps, setApps] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -464,15 +502,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (hasKey) {
-      loadApps();
-      loadCategories();
-    }
-  }, [hasKey, loadApps, loadCategories]);
+    // Load apps and categories immediately (no auth needed)
+    loadApps();
+    loadCategories();
+  }, [loadApps, loadCategories]);
 
   const handleSaveKey = (key) => {
     api.setKey(key);
     setHasKey(true);
+    setShowKeyPrompt(false);
   };
 
   const openApp = async (app) => {
@@ -484,10 +522,10 @@ export default function App() {
     }
   };
 
-  if (!hasKey) return <ApiKeyPrompt onSave={handleSaveKey} />;
-
   return (
     <div style={styles.container}>
+      {showKeyPrompt && <ApiKeyPrompt onSave={handleSaveKey} />}
+      
       {/* Header */}
       <header style={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -500,12 +538,21 @@ export default function App() {
               {rateLimit.remaining}/{rateLimit.limit} req
             </span>
           )}
-          <button
-            style={{ ...styles.btnGhost, fontSize: 11 }}
-            onClick={() => { api.setKey(''); setHasKey(false); }}
-          >
-            🔑 Change Key
-          </button>
+          {hasKey ? (
+            <button
+              style={{ ...styles.btnGhost, fontSize: 11 }}
+              onClick={() => { api.setKey(''); setHasKey(false); }}
+            >
+              🔑 Sign Out
+            </button>
+          ) : (
+            <button
+              style={{ ...styles.btnGhost, fontSize: 11 }}
+              onClick={() => setShowKeyPrompt(true)}
+            >
+              🔑 Sign In
+            </button>
+          )}
         </div>
       </header>
 
