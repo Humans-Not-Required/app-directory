@@ -240,3 +240,5 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 **⚡ APP-DIRECTORY IS DONE. All three HNR projects are complete and deployable.**
 
 *Last updated: 2026-02-07 21:10 UTC — Session: Fixed all 36 tests for open-read auth model (response field renames, public endpoints, auto-approve). Clippy clean.*
+
+*Last updated: 2026-02-08 14:45 UTC — Seeded 3 HNR apps (empty DB resolved). Added /llms.txt endpoint. Pinned time crate to 0.3.36 (0.3.47 needs Rust 1.88). Deploy in progress.*
