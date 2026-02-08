@@ -1,4 +1,4 @@
-use rocket::http::Status;
+use rocket::http::{ContentType, Status};
 use rocket::serde::json::Json;
 use serde_json::{json, Value};
 
@@ -11,6 +11,19 @@ use crate::auth::{self, AuthenticatedKey, OptionalKey};
 use crate::events::{AppEvent, EventBus};
 use crate::models::*;
 use crate::DbState;
+
+// === LLMs.txt ===
+
+#[get("/llms.txt")]
+pub fn llms_txt() -> (ContentType, &'static str) {
+    (ContentType::Text, include_str!("../llms.txt"))
+}
+
+/// Root-level /llms.txt for standard discovery (outside /api/v1)
+#[get("/llms.txt", rank = 2)]
+pub fn root_llms_txt() -> (ContentType, &'static str) {
+    (ContentType::Text, include_str!("../llms.txt"))
+}
 
 // === Health ===
 

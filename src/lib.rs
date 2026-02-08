@@ -115,6 +115,7 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
             "/api/v1",
             routes![
                 routes::health,
+                routes::llms_txt,
                 routes::openapi,
                 routes::submit_app,
                 routes::list_apps,
@@ -149,6 +150,9 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
                 stats::trending_apps,
             ],
         );
+
+    // Mount llms.txt at root level for standard discovery
+    rocket = rocket.mount("/", routes![routes::root_llms_txt]);
 
     // Serve frontend static files if the directory exists
     if static_dir.is_dir() {

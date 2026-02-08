@@ -186,6 +186,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 6. ~~**App deprecation workflow**~~ ✅ Done — deprecate/undeprecate with replacement tracking + sunset dates
 7. ~~**Frontend**~~ ✅ Done — React dashboard with browse/search/submit/admin/trending + unified serving
 8. ~~**Update README**~~ ✅ Done — Frontend dashboard, unified serving, STATIC_DIR, architecture, backend dev docs
+9. ~~**Investigate empty production DB**~~ ✅ Done (2026-02-08 14:35 UTC) — DB was fresh after auth refactor deploy (old volume orphaned). Seeded 3 HNR apps (QR Service, Kanban Board, App Directory) via admin key. All approved and visible.
 
 **Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 36 tests pass.
 
@@ -238,4 +239,4 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 **⚡ APP-DIRECTORY IS DONE. All three HNR projects are complete and deployable.**
 
-*Last updated: 2026-02-07 14:12 UTC — Session: README update with frontend docs, unified serving, STATIC_DIR, architecture*
+*Last updated: 2026-02-07 21:10 UTC — Session: Fixed all 36 tests for open-read auth model (response field renames, public endpoints, auto-approve). Clippy clean.*
