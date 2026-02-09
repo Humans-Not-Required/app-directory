@@ -482,7 +482,7 @@ pub fn update_app(
     let conn = db.0.lock().unwrap();
 
     // Check app exists and get owner
-    let owner_key_id: Result<String, _> = conn.query_row(
+    let owner_key_id: Result<Option<String>, _> = conn.query_row(
         "SELECT submitted_by_key_id FROM apps WHERE id = ?1",
         rusqlite::params![id],
         |r| r.get(0),
@@ -490,16 +490,22 @@ pub fn update_app(
 
     let owner_key_id = match owner_key_id {
         Ok(k) => k,
-        Err(_) => {
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
             return (
                 Status::NotFound,
                 Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
             )
         }
+        Err(_) => {
+            return (
+                Status::InternalServerError,
+                Json(json!({ "error": "INTERNAL_ERROR", "message": "Database error" })),
+            )
+        }
     };
 
     // Only the submitter or an admin can update
-    if owner_key_id != key.id && !key.is_admin {
+    if owner_key_id.as_deref() != Some(key.id.as_str()) && !key.is_admin {
         return (
             Status::Forbidden,
             Json(
@@ -654,7 +660,7 @@ pub fn delete_app(
 ) -> (Status, Json<Value>) {
     let conn = db.0.lock().unwrap();
 
-    let owner_key_id: Result<String, _> = conn.query_row(
+    let owner_key_id: Result<Option<String>, _> = conn.query_row(
         "SELECT submitted_by_key_id FROM apps WHERE id = ?1",
         rusqlite::params![id],
         |r| r.get(0),
@@ -662,15 +668,21 @@ pub fn delete_app(
 
     let owner_key_id = match owner_key_id {
         Ok(k) => k,
-        Err(_) => {
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
             return (
                 Status::NotFound,
                 Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
             )
         }
+        Err(_) => {
+            return (
+                Status::InternalServerError,
+                Json(json!({ "error": "INTERNAL_ERROR", "message": "Database error" })),
+            )
+        }
     };
 
-    if owner_key_id != key.id && !key.is_admin {
+    if owner_key_id.as_deref() != Some(key.id.as_str()) && !key.is_admin {
         return (
             Status::Forbidden,
             Json(

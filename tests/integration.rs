@@ -1592,3 +1592,42 @@ fn test_deprecation_workflow() {
         .dispatch();
     assert_eq!(response.status(), Status::NotFound);
 }
+
+#[test]
+fn test_update_anonymous_app_as_admin() {
+    let (client, key) = setup_client();
+
+    // Submit app anonymously (no auth header)
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Anon App",
+                "short_description": "Submitted without auth",
+                "description": "Anonymous submission",
+                "author_name": "Anonymous",
+                "api_url": "http://old-url.example.com/api"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+
+    // Admin should be able to update the anonymous app
+    let response = client
+        .patch(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{ "api_url": "http://new-url.example.com/api" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify the update took effect
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["api_url"], "http://new-url.example.com/api");
+}
