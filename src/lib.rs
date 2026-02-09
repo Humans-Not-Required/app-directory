@@ -80,6 +80,29 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
         println!("==================================");
     }
 
+    // Allow seeding an admin key from environment variable (for recovery/automation)
+    if let Ok(env_key) = std::env::var("ADMIN_API_KEY") {
+        if !env_key.is_empty() {
+            let key_hash = auth::hash_key(&env_key);
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM api_keys WHERE key_hash = ?1",
+                    rusqlite::params![key_hash],
+                    |r| r.get(0),
+                )
+                .unwrap_or(false);
+            if !exists {
+                let id = uuid::Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO api_keys (id, name, key_hash, is_admin, rate_limit) VALUES (?1, ?2, ?3, 1, 10000)",
+                    rusqlite::params![id, "env-admin", key_hash],
+                )
+                .expect("Failed to create env admin key");
+                println!("✅ Admin key from ADMIN_API_KEY env var registered");
+            }
+        }
+    }
+
     let addr = std::env::var("ROCKET_ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_string());
     let port: u16 = std::env::var("ROCKET_PORT")
         .ok()
