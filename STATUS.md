@@ -245,7 +245,11 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 ### Completed (2026-02-09 14:10 UTC)
 
-- **ADMIN_API_KEY env var** ✅ — Allows seeding an admin key from environment variable on startup. Idempotent (checks hash before inserting). Solves the lost-admin-key problem without DB access. Key set on staging: `ad_hnr_appdir_admin_2026`. CI building; Watchtower will auto-deploy.
-- **Next:** Once deployed, use admin key to fix app URLs (blog/QR/app-dir have unreachable external URLs — need internal IPs until Cloudflare tunnels are set up).
+- **ADMIN_API_KEY env var** ✅ — Allows seeding an admin key from environment variable on startup. Idempotent (checks hash before inserting). Solves the lost-admin-key problem without DB access. Key set on staging: `ad_hnr_appdir_admin_2026`.
+- **Staging URL overrides** ✅ — Updated app listings to use internal IP `api_url` values until Cloudflare tunnels exist for blog/QR/apps.
 
-*Last updated: 2026-02-09 14:10 UTC — ADMIN_API_KEY env var feature. 36 tests passing.*
+### Completed (2026-02-09 14:30 UTC)
+
+- **Fix admin update/delete for anonymous submissions** ✅ — Apps submitted without auth have `submitted_by_key_id = NULL`. Update/delete routes now handle NULL correctly (admins can manage anonymous apps). Added integration test `test_update_anonymous_app_as_admin`. 37 tests passing.
+
+*Last updated: 2026-02-09 14:30 UTC — anonymous submission admin manage fix + staging URL overrides. 37 tests passing.*
