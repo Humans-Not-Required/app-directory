@@ -104,7 +104,11 @@ async fn run_scheduled_checks(db: &SchedulerDb, bus: &EventBus) {
         };
 
         let mut stmt = match conn.prepare(
-            "SELECT id, name, COALESCE(api_url, homepage_url) as check_url
+            "SELECT id, name,
+                    CASE
+                      WHEN api_url IS NOT NULL THEN RTRIM(api_url, '/') || '/health'
+                      ELSE homepage_url
+                    END as check_url
              FROM apps
              WHERE status = 'approved'
                AND (api_url IS NOT NULL OR homepage_url IS NOT NULL)",
