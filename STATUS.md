@@ -252,4 +252,8 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 - **Fix admin update/delete for anonymous submissions** ✅ — Apps submitted without auth have `submitted_by_key_id = NULL`. Update/delete routes now handle NULL correctly (admins can manage anonymous apps). Added integration test `test_update_anonymous_app_as_admin`. 37 tests passing.
 
-*Last updated: 2026-02-09 14:30 UTC — anonymous submission admin manage fix + staging URL overrides. 37 tests passing.*
+### Completed (2026-02-09 15:50 UTC)
+
+- **Fix health checker checking wrong URL** ✅ — Scheduler was hitting raw `api_url` (e.g. `/api/v1`) which returns 404/500 on services without a root API handler. Now appends `/health` to `api_url` when available, so Blog and Agent Docs report healthy correctly. Commit: b655b07. 37 tests passing.
+
+*Last updated: 2026-02-09 15:50 UTC — health checker URL fix. 37 tests passing.*
