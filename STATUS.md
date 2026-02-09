@@ -242,3 +242,10 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 *Last updated: 2026-02-07 21:10 UTC — Session: Fixed all 36 tests for open-read auth model (response field renames, public endpoints, auto-approve). Clippy clean.*
 
 *Last updated: 2026-02-08 14:45 UTC — Seeded 3 HNR apps (empty DB resolved). Added /llms.txt endpoint. Pinned time crate to 0.3.36 (0.3.47 needs Rust 1.88). Deploy in progress.*
+
+### Completed (2026-02-09 14:10 UTC)
+
+- **ADMIN_API_KEY env var** ✅ — Allows seeding an admin key from environment variable on startup. Idempotent (checks hash before inserting). Solves the lost-admin-key problem without DB access. Key set on staging: `ad_hnr_appdir_admin_2026`. CI building; Watchtower will auto-deploy.
+- **Next:** Once deployed, use admin key to fix app URLs (blog/QR/app-dir have unreachable external URLs — need internal IPs until Cloudflare tunnels are set up).
+
+*Last updated: 2026-02-09 14:10 UTC — ADMIN_API_KEY env var feature. 36 tests passing.*
