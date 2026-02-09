@@ -7,40 +7,16 @@ fn setup_client() -> (Client, String) {
     let db_path = format!("/tmp/test_app_dir_{}.db", uuid::Uuid::new_v4());
     std::env::set_var("DATABASE_PATH", &db_path);
 
+    // Build the rocket client (this initializes the DB and creates a default admin key)
     let rocket = app_directory::rocket();
     let client = Client::tracked(rocket).expect("valid rocket instance");
 
-    // Get admin key from stdout capture — instead, create one via the DB
-    // We need to extract the admin key. Let's hit the health endpoint first,
-    // then create a key via direct DB access.
-    // Actually, the admin key is printed to stdout. Let's just create a known key.
+    // Create a test admin key with a known value
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    let key: String = conn
-        .query_row(
-            "SELECT key_hash FROM api_keys WHERE is_admin = 1 LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-
-    // We can't reverse the hash, so let's create a new admin key with known value
-    let test_key = "ad_testkey12345678901234567890";
-    let key_hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        test_key.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
-    conn.execute(
-        "INSERT INTO api_keys (id, name, key_hash, is_admin, rate_limit) VALUES ('test-admin', 'test', ?1, 1, 10000)",
-        rusqlite::params![key_hash],
-    ).unwrap();
-
+    let test_key = app_directory::auth::create_api_key(&conn, "test-admin", true, Some(10000));
     drop(conn);
-    let _ = key; // suppress unused warning
 
-    (client, test_key.to_string())
+    (client, test_key)
 }
 
 #[test]
@@ -421,27 +397,16 @@ fn test_rate_limiting() {
     let rocket = app_directory::rocket();
     let client = Client::tracked(rocket).expect("valid rocket instance");
 
-    // Create a key with rate_limit = 3
-    let test_key = "ad_ratelimitkey_test_12345678";
-    let key_hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        test_key.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
+    // Create a low-rate-limit key
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    conn.execute(
-        "INSERT INTO api_keys (id, name, key_hash, is_admin, rate_limit) VALUES ('rl-test', 'rate-test', ?1, 0, 3)",
-        rusqlite::params![key_hash],
-    ).unwrap();
+    let test_key = app_directory::auth::create_api_key(&conn, "rate-test", false, Some(3));
     drop(conn);
 
     // First 3 requests should succeed with rate limit headers (use /apps/mine — requires auth)
     for i in 0..3 {
         let response = client
             .get("/api/v1/apps/mine")
-            .header(Header::new("X-API-Key", test_key))
+            .header(Header::new("X-API-Key", test_key.clone()))
             .dispatch();
         assert_eq!(
             response.status(),
@@ -461,7 +426,7 @@ fn test_rate_limiting() {
     // 4th request should be rate limited
     let response = client
         .get("/api/v1/apps/mine")
-        .header(Header::new("X-API-Key", test_key))
+        .header(Header::new("X-API-Key", test_key.clone()))
         .dispatch();
     assert_eq!(response.status(), Status::TooManyRequests);
 }
@@ -1097,18 +1062,7 @@ fn test_schedule_endpoint() {
 
     // Non-admin cannot view schedule
     let conn = rusqlite::Connection::open(std::env::var("DATABASE_PATH").unwrap()).unwrap();
-    let viewer_key = "vk_testviewerkey12345678901234";
-    let key_hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        viewer_key.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
-    conn.execute(
-        "INSERT INTO api_keys (id, name, key_hash, is_admin, rate_limit) VALUES ('test-viewer', 'viewer', ?1, 0, 100)",
-        rusqlite::params![key_hash],
-    ).unwrap();
+    let viewer_key = app_directory::auth::create_api_key(&conn, "viewer", false, Some(100));
     drop(conn);
 
     let response = client
