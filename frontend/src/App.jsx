@@ -541,7 +541,7 @@ export default function App() {
           {hasKey ? (
             <button
               style={{ ...styles.btnGhost, fontSize: 11 }}
-              onClick={() => { api.setKey(''); setHasKey(false); }}
+              onClick={() => { api.setKey(''); setHasKey(false); setTab('browse'); }}
             >
               🔑 Sign Out
             </button>
@@ -562,7 +562,7 @@ export default function App() {
           ['browse', '🔍 Browse'],
           ['submit', '➕ Submit'],
           ['trending', '🔥 Trending'],
-          ['admin', '🛡️ Admin'],
+          ...(hasKey ? [['admin', '🛡️ Admin']] : []),
         ].map(([id, label]) => (
           <button
             key={id}
