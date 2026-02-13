@@ -258,8 +258,18 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 *Last updated: 2026-02-09 15:50 UTC — health checker URL fix. 37 tests passing.*
 
+### Completed (2026-02-13 22:22 UTC)
+
+- **Enhanced admin panel frontend** ✅ — Admin panel now has 4 sub-tabs:
+  - **Pending:** App approval/rejection with improved layout (category badges, URLs)
+  - **All Apps:** List all apps with featured/verified badge toggles, deprecate/undeprecate, delete buttons
+  - **Health:** Dedicated health overview with batch check and issues list
+  - **Keys:** List/create/revoke API keys with one-time key display
+  - Admin tab still hidden when not authenticated (commit 622695a)
+  - Frontend builds cleanly, 37 backend tests pass. Commit 6c28080.
+
 ## Incoming Directions (Work Queue)
 
 <!-- WORK_QUEUE_DIRECTIONS_START -->
-- [ ] App Directory: Hide admin link when not logged in — Why does the app directory have an admin link right on the front when you're not logged in? (Jordan; 2026-02-13T09:59:53.287Z; task_id: 4804c7a6-0837-48f9-aa14-2841d6ed89ce)
+- [x] App Directory: Hide admin link when not logged in — ✅ Done (622695a + enhanced admin panel 6c28080)
 <!-- WORK_QUEUE_DIRECTIONS_END -->
