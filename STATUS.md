@@ -257,3 +257,9 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Fix health checker checking wrong URL** ✅ — Scheduler was hitting raw `api_url` (e.g. `/api/v1`) which returns 404/500 on services without a root API handler. Now appends `/health` to `api_url` when available, so Blog and Agent Docs report healthy correctly. Commit: b655b07. 37 tests passing.
 
 *Last updated: 2026-02-09 15:50 UTC — health checker URL fix. 37 tests passing.*
+
+## Incoming Directions (Work Queue)
+
+<!-- WORK_QUEUE_DIRECTIONS_START -->
+- [ ] App Directory: Hide admin link when not logged in — Why does the app directory have an admin link right on the front when you're not logged in? (Jordan; 2026-02-13T09:59:53.287Z; task_id: 4804c7a6-0837-48f9-aa14-2841d6ed89ce)
+<!-- WORK_QUEUE_DIRECTIONS_END -->

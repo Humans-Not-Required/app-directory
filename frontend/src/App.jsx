@@ -337,9 +337,14 @@ function SubmitAppForm({ categories, onSubmit, onCancel }) {
 }
 
 function AdminPanel({ onRefresh }) {
+  const [adminTab, setAdminTab] = useState('pending');
   const [pending, setPending] = useState([]);
+  const [allApps, setAllApps] = useState([]);
+  const [keys, setKeys] = useState([]);
   const [healthSum, setHealthSum] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
+  const [newKeyResult, setNewKeyResult] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -348,16 +353,36 @@ function AdminPanel({ onRefresh }) {
       setPending(p.data?.apps || []);
       setHealthSum(h.data);
     } catch (e) {
-      if (e.status === 403) setPending('forbidden');
+      if (e.status === 403) setForbidden(true);
     }
     setLoading(false);
   }, []);
 
+  const loadAllApps = useCallback(async () => {
+    try {
+      const res = await api.listApps('limit=100&sort=newest');
+      setAllApps(res.data?.apps || []);
+    } catch { /* ignore */ }
+  }, []);
+
+  const loadKeys = useCallback(async () => {
+    try {
+      const res = await api.listKeys();
+      setKeys(res.data?.keys || res.data || []);
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (adminTab === 'apps') loadAllApps();
+    if (adminTab === 'keys') loadKeys();
+  }, [adminTab, loadAllApps, loadKeys]);
 
   const handleApprove = async (id) => {
     await api.approveApp(id);
     load();
+    loadAllApps();
     onRefresh?.();
   };
 
@@ -366,6 +391,7 @@ function AdminPanel({ onRefresh }) {
     if (!reason) return;
     await api.rejectApp(id, reason);
     load();
+    loadAllApps();
     onRefresh?.();
   };
 
@@ -374,54 +400,285 @@ function AdminPanel({ onRefresh }) {
     load();
   };
 
+  const handleToggleBadge = async (app, field) => {
+    try {
+      await api.updateApp(app.id, { [field]: !app[field] });
+      loadAllApps();
+      onRefresh?.();
+    } catch (e) {
+      alert(e.error || `Failed to toggle ${field}`);
+    }
+  };
+
+  const handleDeleteApp = async (app) => {
+    if (!confirm(`Delete "${app.name}"? This cannot be undone.`)) return;
+    try {
+      await api.deleteApp(app.id);
+      loadAllApps();
+      load();
+      onRefresh?.();
+    } catch (e) {
+      alert(e.error || 'Failed to delete');
+    }
+  };
+
+  const handleDeprecate = async (app) => {
+    const reason = prompt(`Deprecation reason for "${app.name}":`);
+    if (!reason) return;
+    const replacementId = prompt('Replacement app ID (leave blank if none):') || undefined;
+    const sunsetAt = prompt('Sunset date ISO-8601 (leave blank if none):') || undefined;
+    try {
+      await api.deprecateApp(app.id, { reason, replacement_app_id: replacementId, sunset_at: sunsetAt });
+      loadAllApps();
+      onRefresh?.();
+    } catch (e) {
+      alert(e.error || 'Failed to deprecate');
+    }
+  };
+
+  const handleUndeprecate = async (app) => {
+    try {
+      await api.undeprecateApp(app.id);
+      loadAllApps();
+      onRefresh?.();
+    } catch (e) {
+      alert(e.error || 'Failed to undeprecate');
+    }
+  };
+
+  const handleCreateKey = async () => {
+    const name = prompt('Key name/description (optional):') || 'Admin-created key';
+    try {
+      const res = await api.createKey({ name });
+      setNewKeyResult(res.data);
+      loadKeys();
+    } catch (e) {
+      alert(e.error || 'Failed to create key');
+    }
+  };
+
+  const handleDeleteKey = async (keyId) => {
+    if (!confirm('Revoke this API key? Apps submitted with it will remain.')) return;
+    try {
+      await api.deleteKey(keyId);
+      loadKeys();
+    } catch (e) {
+      alert(e.error || 'Failed to revoke key');
+    }
+  };
+
   if (loading) return <p style={{ color: '#94a3b8' }}>Loading admin panel...</p>;
-  if (pending === 'forbidden') return <p style={{ color: '#f59e0b' }}>Admin key required for this panel.</p>;
+  if (forbidden) return <p style={{ color: '#f59e0b' }}>Admin key required for this panel.</p>;
+
+  const adminTabs = [
+    ['pending', `📋 Pending (${pending.length})`],
+    ['apps', '📂 All Apps'],
+    ['health', '💚 Health'],
+    ['keys', '🔑 Keys'],
+  ];
 
   return (
     <div>
       <h3 style={{ color: '#f1f5f9', margin: '0 0 12px' }}>🛡️ Admin Panel</h3>
 
-      {/* Health Summary */}
-      {healthSum && (
-        <div style={{ ...styles.card, marginBottom: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h4 style={{ margin: 0, color: '#f1f5f9' }}>Health Overview</h4>
-            <button style={{ ...styles.btn, fontSize: 12 }} onClick={handleBatchHealth}>Run Batch Check</button>
-          </div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-            {Object.entries(healthSum.counts || {}).map(([status, count]) => (
-              <div key={status} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: HEALTH_COLORS[status] || '#6b7280' }}>{count}</div>
-                <div style={{ fontSize: 11, color: '#94a3b8' }}>{status}</div>
+      {/* Admin Sub-Tabs */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid #334155' }}>
+        {adminTabs.map(([id, label]) => (
+          <button
+            key={id}
+            style={{
+              ...styles.tab,
+              fontSize: 12,
+              padding: '8px 14px',
+              ...(adminTab === id ? styles.tabActive : {}),
+            }}
+            onClick={() => setAdminTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Pending Tab */}
+      {adminTab === 'pending' && (
+        <div style={styles.card}>
+          <h4 style={{ margin: '0 0 8px', color: '#f1f5f9' }}>Pending Apps ({pending.length})</h4>
+          {pending.length === 0 && <p style={{ color: '#64748b', fontSize: 13 }}>No pending submissions. 🎉</p>}
+          {pending.map((app) => (
+            <div key={app.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #1e293b' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: '#f1f5f9', fontWeight: 500 }}>{app.name}</span>
+                  <Badge label={app.protocol} color={PROTOCOL_COLORS[app.protocol] || '#6b7280'} small />
+                  <Badge label={app.category} color="#6366f1" small />
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{app.description?.slice(0, 120)}</div>
+                {app.url && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{app.url}</div>}
               </div>
-            ))}
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                <button style={{ ...styles.btn, background: '#166534', color: '#86efac', fontSize: 12 }} onClick={() => handleApprove(app.id)}>✓ Approve</button>
+                <button style={{ ...styles.btn, background: '#7f1d1d', color: '#fca5a5', fontSize: 12 }} onClick={() => handleReject(app.id)}>✗ Reject</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* All Apps Tab */}
+      {adminTab === 'apps' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: '#94a3b8' }}>{allApps.length} apps total</span>
+            <button style={{ ...styles.btn, fontSize: 12 }} onClick={loadAllApps}>↻ Refresh</button>
+          </div>
+          {allApps.map((app) => (
+            <div key={app.id} style={{ ...styles.card, marginBottom: 6, padding: '10px 14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#f1f5f9', fontWeight: 500, fontSize: 14 }}>{app.name}</span>
+                    <Badge label={app.status} color={app.status === 'approved' ? '#22c55e' : app.status === 'pending' ? '#f59e0b' : app.status === 'deprecated' ? '#ef4444' : '#6b7280'} small />
+                    <Badge label={app.protocol} color={PROTOCOL_COLORS[app.protocol] || '#6b7280'} small />
+                    {app.is_featured && <Badge label="⭐ Featured" color="#f59e0b" small />}
+                    {app.is_verified && <Badge label="✓ Verified" color="#22c55e" small />}
+                    {app.last_health_status && (
+                      <Badge label={app.last_health_status} color={HEALTH_COLORS[app.last_health_status] || '#6b7280'} small />
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>{app.description?.slice(0, 100)}</div>
+                  {app.deprecated_reason && (
+                    <div style={{ fontSize: 11, color: '#f87171', marginTop: 2 }}>⚠️ {app.deprecated_reason}</div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 3, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 260 }}>
+                  <button
+                    style={{ ...styles.btn, fontSize: 11, padding: '4px 8px', background: app.is_featured ? '#92400e' : '#334155' }}
+                    onClick={() => handleToggleBadge(app, 'is_featured')}
+                    title={app.is_featured ? 'Remove featured' : 'Set featured'}
+                  >
+                    {app.is_featured ? '⭐ Unfeat.' : '☆ Feature'}
+                  </button>
+                  <button
+                    style={{ ...styles.btn, fontSize: 11, padding: '4px 8px', background: app.is_verified ? '#166534' : '#334155' }}
+                    onClick={() => handleToggleBadge(app, 'is_verified')}
+                    title={app.is_verified ? 'Remove verified' : 'Set verified'}
+                  >
+                    {app.is_verified ? '✓ Unverify' : '○ Verify'}
+                  </button>
+                  {app.status !== 'deprecated' ? (
+                    <button
+                      style={{ ...styles.btn, fontSize: 11, padding: '4px 8px', background: '#7f1d1d', color: '#fca5a5' }}
+                      onClick={() => handleDeprecate(app)}
+                    >
+                      ⚠ Deprecate
+                    </button>
+                  ) : (
+                    <button
+                      style={{ ...styles.btn, fontSize: 11, padding: '4px 8px', background: '#166534', color: '#86efac' }}
+                      onClick={() => handleUndeprecate(app)}
+                    >
+                      ↩ Restore
+                    </button>
+                  )}
+                  <button
+                    style={{ ...styles.btn, fontSize: 11, padding: '4px 8px', background: '#450a0a', color: '#fca5a5' }}
+                    onClick={() => handleDeleteApp(app)}
+                  >
+                    🗑 Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Health Tab */}
+      {adminTab === 'health' && healthSum && (
+        <div>
+          <div style={{ ...styles.card, marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h4 style={{ margin: 0, color: '#f1f5f9' }}>Health Overview</h4>
+              <button style={{ ...styles.btn, fontSize: 12 }} onClick={handleBatchHealth}>▶ Run Batch Check</button>
+            </div>
+            <div style={{ display: 'flex', gap: 24, marginTop: 12 }}>
+              {Object.entries(healthSum.counts || {}).map(([status, count]) => (
+                <div key={status} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: HEALTH_COLORS[status] || '#6b7280' }}>{count}</div>
+                  <div style={{ fontSize: 12, color: '#94a3b8', textTransform: 'capitalize' }}>{status}</div>
+                </div>
+              ))}
+            </div>
           </div>
           {healthSum.apps_with_issues?.length > 0 && (
-            <div style={{ marginTop: 8, fontSize: 12, color: '#f87171' }}>
-              Issues: {healthSum.apps_with_issues.map((a) => a.name).join(', ')}
+            <div style={styles.card}>
+              <h4 style={{ margin: '0 0 8px', color: '#f87171' }}>⚠️ Apps With Issues</h4>
+              {healthSum.apps_with_issues.map((a) => (
+                <div key={a.id || a.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #1e293b' }}>
+                  <div>
+                    <span style={{ color: '#f1f5f9', fontWeight: 500 }}>{a.name}</span>
+                    {a.last_health_status && (
+                      <span style={{ marginLeft: 8 }}><Badge label={a.last_health_status} color={HEALTH_COLORS[a.last_health_status] || '#6b7280'} small /></span>
+                    )}
+                  </div>
+                  {a.last_checked_at && (
+                    <span style={{ fontSize: 11, color: '#64748b' }}>Checked: {new Date(a.last_checked_at).toLocaleString()}</span>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
       )}
 
-      {/* Pending Apps */}
-      <div style={styles.card}>
-        <h4 style={{ margin: '0 0 8px', color: '#f1f5f9' }}>Pending Apps ({pending.length})</h4>
-        {pending.length === 0 && <p style={{ color: '#64748b', fontSize: 13 }}>No pending submissions.</p>}
-        {pending.map((app) => (
-          <div key={app.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #1e293b' }}>
-            <div>
-              <span style={{ color: '#f1f5f9', fontWeight: 500 }}>{app.name}</span>
-              <span style={{ marginLeft: 8 }}><Badge label={app.protocol} color={PROTOCOL_COLORS[app.protocol] || '#6b7280'} small /></span>
-              <div style={{ fontSize: 12, color: '#94a3b8' }}>{app.description?.slice(0, 80)}...</div>
-            </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button style={{ ...styles.btn, background: '#166534', color: '#86efac', fontSize: 12 }} onClick={() => handleApprove(app.id)}>✓ Approve</button>
-              <button style={{ ...styles.btn, background: '#7f1d1d', color: '#fca5a5', fontSize: 12 }} onClick={() => handleReject(app.id)}>✗ Reject</button>
-            </div>
+      {/* Keys Tab */}
+      {adminTab === 'keys' && (
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: '#94a3b8' }}>{keys.length} API keys</span>
+            <button style={{ ...styles.btn, ...styles.btnPrimary, fontSize: 12 }} onClick={handleCreateKey}>+ Create Key</button>
           </div>
-        ))}
-      </div>
+
+          {newKeyResult && (
+            <div style={{ ...styles.card, marginBottom: 12, border: '1px solid #f59e0b44', background: '#1e293b' }}>
+              <h4 style={{ margin: '0 0 8px', color: '#f59e0b' }}>🔑 New Key Created — Copy Now!</h4>
+              <div style={{ ...styles.input, fontFamily: 'monospace', fontSize: 12, userSelect: 'all', marginBottom: 8 }}>
+                {newKeyResult.api_key || newKeyResult.key}
+              </div>
+              <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
+                This key is shown only once. Store it safely.
+              </p>
+              <button style={{ ...styles.btnGhost, marginTop: 8, fontSize: 11 }} onClick={() => setNewKeyResult(null)}>Dismiss</button>
+            </div>
+          )}
+
+          <div style={styles.card}>
+            {keys.length === 0 && <p style={{ color: '#64748b', fontSize: 13 }}>No API keys found.</p>}
+            {keys.map((k) => (
+              <div key={k.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #1e293b' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: '#f1f5f9', fontFamily: 'monospace', fontSize: 12 }}>
+                      {k.key_prefix || k.id?.slice(0, 8)}...
+                    </span>
+                    {k.is_admin && <Badge label="admin" color="#f59e0b" small />}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                    Created: {k.created_at ? new Date(k.created_at).toLocaleDateString() : 'unknown'}
+                    {k.request_count != null && ` · ${k.request_count} requests`}
+                  </div>
+                </div>
+                <button
+                  style={{ ...styles.btn, fontSize: 11, padding: '4px 8px', background: '#7f1d1d', color: '#fca5a5' }}
+                  onClick={() => handleDeleteKey(k.id)}
+                >
+                  Revoke
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
