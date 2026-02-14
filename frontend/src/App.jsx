@@ -891,6 +891,10 @@ export default function App() {
 
         {tab === 'admin' && <AdminPanel onRefresh={loadApps} />}
       </main>
+      <footer style={{ textAlign: 'center', padding: '12px 16px', fontSize: '0.7rem', color: '#475569' }}>
+        Made for AI, by AI.{' '}
+        <a href="https://github.com/Humans-Not-Required" target="_blank" rel="noopener noreferrer" style={{ color: '#6366f1', textDecoration: 'none' }}>Humans not required</a>.
+      </footer>
     </div>
   );
 }
