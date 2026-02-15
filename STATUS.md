@@ -188,14 +188,17 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 8. ~~**Update README**~~ ✅ Done — Frontend dashboard, unified serving, STATIC_DIR, architecture, backend dev docs
 9. ~~**Investigate empty production DB**~~ ✅ Done (2026-02-08 14:35 UTC) — DB was fresh after auth refactor deploy (old volume orphaned). Seeded 3 HNR apps (QR Service, Kanban Board, App Directory) via admin key. All approved and visible.
 
-**Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 36 tests pass.
+- [x] **Backend route decomposition** (commit fec920d) — Monolithic 1846-line `src/routes.rs` split into 6 focused modules under `src/routes/`: system (82), apps (758), reviews (169), keys (102), webhook_routes (293), admin (405), mod.rs (17). Extracted `app_row_to_json` helper. Zero clippy warnings. All 37 tests pass.
+- [x] **Parallel-safe tests** (commit fec920d) — Added `rocket_with_path()` to bypass env var races. Tests no longer need `--test-threads=1`. Parallel execution: 1.5s vs 4s sequential.
+
+**Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 37 tests pass.
 
 ### ⚠️ Gotchas
 
 - `cargo` not on PATH by default — use `export PATH="$HOME/.cargo/bin:$PATH"` before building
 - CORS wide open (all origins) — tighten for production
 - Admin key printed to stdout on first run — save it!
-- **Tests must run with `--test-threads=1`** — tests use `std::env::set_var("DATABASE_PATH", ...)` which races under parallel execution
+- ~~**Tests must run with `--test-threads=1`**~~ ✅ Fixed — tests now use `rocket_with_path()` to pass DB path directly, avoiding env var races. Parallel execution works.
 - Search is LIKE-based (not full-text search) — adequate for moderate scale
 - No slug uniqueness guarantee across deletions
 - Rate limiter state is in-memory — resets on server restart
