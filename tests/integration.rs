@@ -1634,3 +1634,324 @@ fn test_update_anonymous_app_as_admin() {
     let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
     assert_eq!(body["api_url"], "http://new-url.example.com/api");
 }
+
+// === Edit Token Auth Tests ===
+
+#[test]
+fn test_update_app_with_edit_token_query_param() {
+    let (client, _key) = setup_client();
+
+    // Submit anonymously — returns edit_token
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Token Edit Test",
+                "short_description": "Test edit token",
+                "description": "Testing edit via token",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    let edit_token = body["edit_token"].as_str().unwrap().to_string();
+
+    // Update via edit token in query param (no API key)
+    let response = client
+        .patch(format!("/api/v1/apps/{}?token={}", app_id, edit_token))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Updated Via Token" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify update
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["name"], "Updated Via Token");
+}
+
+#[test]
+fn test_update_app_with_edit_token_header() {
+    let (client, _key) = setup_client();
+
+    // Submit anonymously
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Header Token Test",
+                "short_description": "Test edit token header",
+                "description": "Testing edit via X-Edit-Token header",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    let edit_token = body["edit_token"].as_str().unwrap().to_string();
+
+    // Update via X-Edit-Token header
+    let response = client
+        .patch(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-Edit-Token", edit_token))
+        .header(ContentType::JSON)
+        .body(r#"{ "description": "Updated via header" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["description"], "Updated via header");
+}
+
+#[test]
+fn test_delete_app_with_edit_token() {
+    let (client, _key) = setup_client();
+
+    // Submit anonymously
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Token Delete Test",
+                "short_description": "Test delete via token",
+                "description": "Will be deleted via edit token",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    let edit_token = body["edit_token"].as_str().unwrap().to_string();
+
+    // Delete via edit token (no API key)
+    let response = client
+        .delete(format!("/api/v1/apps/{}?token={}", app_id, edit_token))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify gone
+    let response = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+#[test]
+fn test_wrong_edit_token_rejected() {
+    let (client, _key) = setup_client();
+
+    // Submit anonymously
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Wrong Token Test",
+                "short_description": "Test wrong token",
+                "description": "Should reject wrong token",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+
+    // Try to update with wrong edit token
+    let response = client
+        .patch(format!("/api/v1/apps/{}?token=ad_wrong_token_value", app_id))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Should Not Work" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+}
+
+#[test]
+fn test_no_auth_update_rejected() {
+    let (client, _key) = setup_client();
+
+    // Submit anonymously
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "No Auth Test",
+                "short_description": "Test no auth",
+                "description": "Should reject with no auth",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+
+    // Try to update with NO auth at all
+    let response = client
+        .patch(format!("/api/v1/apps/{}", app_id))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Should Not Work" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Unauthorized);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"], "UNAUTHORIZED");
+}
+
+#[test]
+fn test_edit_token_cannot_set_badges() {
+    let (client, _key) = setup_client();
+
+    // Submit anonymously
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Badge Test",
+                "short_description": "Test badge restriction",
+                "description": "Edit token should not set badges",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    let edit_token = body["edit_token"].as_str().unwrap().to_string();
+
+    // Try to set featured via edit token (should fail — admin only)
+    let response = client
+        .patch(format!("/api/v1/apps/{}?token={}", app_id, edit_token))
+        .header(ContentType::JSON)
+        .body(r#"{ "is_featured": true }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert!(body["error"].as_str().unwrap().contains("FORBIDDEN"));
+}
+
+#[test]
+fn test_edit_token_cannot_change_status() {
+    let (client, _key) = setup_client();
+
+    // Submit anonymously
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "Status Test",
+                "short_description": "Test status restriction",
+                "description": "Edit token should not change status",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = body["app_id"].as_str().unwrap().to_string();
+    let edit_token = body["edit_token"].as_str().unwrap().to_string();
+
+    // Try to change status via edit token (should fail — admin only)
+    let response = client
+        .patch(format!("/api/v1/apps/{}?token={}", app_id, edit_token))
+        .header(ContentType::JSON)
+        .body(r#"{ "status": "rejected" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+}
+
+#[test]
+fn test_event_stream_no_auth_required() {
+    let (client, _key) = setup_client();
+
+    // SSE event stream should work without auth now
+    let response = client
+        .get("/api/v1/events/stream")
+        .dispatch();
+    // SSE returns 200 with a streaming body
+    assert_eq!(response.status(), Status::Ok);
+}
+
+#[test]
+fn test_update_nonexistent_app_with_token() {
+    let (client, _key) = setup_client();
+
+    // Try to update a non-existent app
+    let response = client
+        .patch("/api/v1/apps/nonexistent-id?token=ad_some_token")
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Ghost" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+#[test]
+fn test_delete_nonexistent_app_with_token() {
+    let (client, _key) = setup_client();
+
+    // Try to delete a non-existent app
+    let response = client
+        .delete("/api/v1/apps/nonexistent-id?token=ad_some_token")
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+#[test]
+fn test_cross_app_token_rejected() {
+    let (client, _key) = setup_client();
+
+    // Submit two apps anonymously
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "App One",
+                "short_description": "First app",
+                "description": "First",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let _app1_id = body["app_id"].as_str().unwrap().to_string();
+    let app1_token = body["edit_token"].as_str().unwrap().to_string();
+
+    let response = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(
+            r#"{
+                "name": "App Two",
+                "short_description": "Second app",
+                "description": "Second",
+                "author_name": "Agent"
+            }"#,
+        )
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app2_id = body["app_id"].as_str().unwrap().to_string();
+
+    // Try to use app1's token on app2 (should fail)
+    let response = client
+        .patch(format!("/api/v1/apps/{}?token={}", app2_id, app1_token))
+        .header(ContentType::JSON)
+        .body(r#"{ "name": "Cross-Token Attack" }"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Forbidden);
+}

@@ -7,7 +7,6 @@ use rocket::tokio::select;
 use rocket::tokio::time::Duration;
 use rocket::Shutdown;
 
-use crate::auth::AuthenticatedKey;
 use crate::events::EventBus;
 
 // === LLMs.txt ===
@@ -45,7 +44,6 @@ pub fn cors_preflight(_path: std::path::PathBuf) -> Status {
 
 #[get("/events/stream")]
 pub fn event_stream(
-    _key: AuthenticatedKey,
     bus: &rocket::State<EventBus>,
     mut shutdown: Shutdown,
 ) -> EventStream![] {

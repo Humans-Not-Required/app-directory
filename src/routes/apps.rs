@@ -2,7 +2,7 @@ use rocket::http::Status;
 use rocket::serde::json::Json;
 use serde_json::{json, Value};
 
-use crate::auth::{self, AuthenticatedKey, OptionalKey};
+use crate::auth::{self, AuthenticatedKey, EditTokenParam, OptionalKey, check_edit_access};
 use crate::events::{AppEvent, EventBus};
 use crate::models::*;
 use crate::DbState;
@@ -319,7 +319,8 @@ pub fn list_my_apps(
 
 #[patch("/apps/<id>", data = "<body>")]
 pub fn update_app(
-    key: AuthenticatedKey,
+    opt_key: OptionalKey,
+    edit_token: EditTokenParam,
     id: &str,
     body: Json<UpdateAppRequest>,
     db: &rocket::State<DbState>,
@@ -327,44 +328,20 @@ pub fn update_app(
 ) -> (Status, Json<Value>) {
     let conn = db.0.lock().unwrap();
 
-    let owner_key_id: Result<Option<String>, _> = conn.query_row(
-        "SELECT submitted_by_key_id FROM apps WHERE id = ?1",
-        rusqlite::params![id],
-        |r| r.get(0),
-    );
-
-    let owner_key_id = match owner_key_id {
-        Ok(k) => k,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            return (
-                Status::NotFound,
-                Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
-            )
-        }
-        Err(_) => {
-            return (
-                Status::InternalServerError,
-                Json(json!({ "error": "INTERNAL_ERROR", "message": "Database error" })),
-            )
-        }
+    // Check edit access via edit token, API key owner, or admin
+    let access = match check_edit_access(&conn, id, &edit_token.0, &opt_key.0) {
+        Ok(a) => a,
+        Err((status, err)) => return (status, Json(err)),
     };
 
-    if owner_key_id.as_deref() != Some(key.id.as_str()) && !key.is_admin {
-        return (
-            Status::Forbidden,
-            Json(
-                json!({ "error": "FORBIDDEN", "message": "Only the submitter or an admin can update this app" }),
-            ),
-        );
-    }
-
-    if body.status.is_some() && !key.is_admin {
+    // Admin-only fields: status, featured, verified badges
+    if body.status.is_some() && !access.is_admin() {
         return (
             Status::Forbidden,
             Json(json!({ "error": "FORBIDDEN", "message": "Only admins can change app status" })),
         );
     }
-    if (body.is_featured.is_some() || body.is_verified.is_some()) && !key.is_admin {
+    if (body.is_featured.is_some() || body.is_verified.is_some()) && !access.is_admin() {
         return (
             Status::Forbidden,
             Json(
@@ -494,42 +471,18 @@ pub fn update_app(
 
 #[delete("/apps/<id>")]
 pub fn delete_app(
-    key: AuthenticatedKey,
+    opt_key: OptionalKey,
+    edit_token: EditTokenParam,
     id: &str,
     db: &rocket::State<DbState>,
     bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
     let conn = db.0.lock().unwrap();
 
-    let owner_key_id: Result<Option<String>, _> = conn.query_row(
-        "SELECT submitted_by_key_id FROM apps WHERE id = ?1",
-        rusqlite::params![id],
-        |r| r.get(0),
-    );
-
-    let owner_key_id = match owner_key_id {
-        Ok(k) => k,
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            return (
-                Status::NotFound,
-                Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
-            )
-        }
-        Err(_) => {
-            return (
-                Status::InternalServerError,
-                Json(json!({ "error": "INTERNAL_ERROR", "message": "Database error" })),
-            )
-        }
-    };
-
-    if owner_key_id.as_deref() != Some(key.id.as_str()) && !key.is_admin {
-        return (
-            Status::Forbidden,
-            Json(
-                json!({ "error": "FORBIDDEN", "message": "Only the submitter or an admin can delete this app" }),
-            ),
-        );
+    // Check edit access via edit token, API key owner, or admin
+    match check_edit_access(&conn, id, &edit_token.0, &opt_key.0) {
+        Ok(_) => {}
+        Err((status, err)) => return (status, Json(err)),
     }
 
     conn.execute(

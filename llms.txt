@@ -11,7 +11,7 @@
 ## Auth Model
 - Read operations (GET): public, no auth required
 - Submit app: no auth required, returns an edit_token
-- Edit/delete app: requires edit_token (Bearer header or ?token= query param)
+- Edit/delete app: requires edit_token (?token= query param or X-Edit-Token header) or API key (owner or admin)
 - Admin operations: require admin API key (auto-generated on first run)
 
 ## Core Endpoints
@@ -57,7 +57,7 @@
 - Events: app.submitted, app.approved, app.rejected, app.updated, app.deleted, review.submitted, health.checked, app.deprecated, app.undeprecated
 
 ### Real-Time
-- GET /api/v1/events/stream — SSE event stream (requires API key)
+- GET /api/v1/events/stream — SSE event stream (public, no auth required)
 
 ## App Object
 ```json

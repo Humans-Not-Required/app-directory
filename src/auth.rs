@@ -137,36 +137,16 @@ impl<'r> FromRequest<'r> for OptionalKey {
     }
 }
 
-/// Edit token authorization (for editing/deleting specific apps)
+/// Edit token extracted from ?token= query param or X-Edit-Token header (optional)
 #[derive(Debug)]
-pub struct EditAuth {
-    pub app_id: String,
-    pub via: EditAuthVia,
-}
+pub struct EditTokenParam(pub Option<String>);
 
-#[derive(Debug)]
-pub enum EditAuthVia {
-    EditToken,
-    ApiKey(String),  // key_id
-    Admin(String),   // key_id
-}
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for EditTokenParam {
+    type Error = ();
 
-impl EditAuth {
-    /// Check if the request can edit the given app_id via:
-    /// 1. Edit token in query param or header
-    /// 2. API key that created the app
-    /// 3. Admin API key
-    pub async fn from_request_for_app(
-        request: &rocket::Request<'_>,
-        app_id: &str,
-    ) -> Result<Self, Status> {
-        let db = request
-            .rocket()
-            .state::<DbState>()
-            .ok_or(Status::InternalServerError)?;
-
-        // Try edit token first (query param or header)
-        let edit_token = request
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let token = request
             .query_value::<String>("token")
             .and_then(|r| r.ok())
             .or_else(|| {
@@ -175,57 +155,98 @@ impl EditAuth {
                     .get_one("X-Edit-Token")
                     .map(|s| s.to_string())
             });
+        Outcome::Success(EditTokenParam(token))
+    }
+}
 
-        if let Some(token) = edit_token {
-            let token_hash = hash_key(&token);
-            let conn = db.0.lock().map_err(|_| Status::InternalServerError)?;
-            
-            // Check if token matches this app
-            let valid: bool = conn
-                .query_row(
-                    "SELECT COUNT(*) > 0 FROM apps WHERE id = ?1 AND edit_token_hash = ?2",
-                    rusqlite::params![app_id, token_hash],
-                    |r| r.get(0),
-                )
-                .unwrap_or(false);
+/// Result of checking edit access for an app
+#[derive(Debug)]
+pub enum EditAccess {
+    /// Authenticated via per-app edit token
+    EditToken,
+    /// Authenticated via API key (owner of the app)
+    Owner(String),
+    /// Authenticated via admin API key
+    Admin(String),
+}
 
-            if valid {
-                return Ok(EditAuth {
-                    app_id: app_id.to_string(),
-                    via: EditAuthVia::EditToken,
-                });
-            }
+impl EditAccess {
+    /// Returns true if the access level allows admin-only operations (status, badges)
+    pub fn is_admin(&self) -> bool {
+        matches!(self, EditAccess::Admin(_))
+    }
+}
+
+/// Check if the caller can edit a specific app.
+/// Tries: (1) edit token, (2) API key owner, (3) admin key.
+/// Returns Ok(EditAccess) or Err((Status, error json)).
+pub fn check_edit_access(
+    conn: &Connection,
+    app_id: &str,
+    edit_token: &Option<String>,
+    api_key: &Option<AuthenticatedKey>,
+) -> Result<EditAccess, (Status, serde_json::Value)> {
+    // First, verify app exists
+    let app_exists: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM apps WHERE id = ?1",
+            rusqlite::params![app_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    if !app_exists {
+        return Err((
+            Status::NotFound,
+            serde_json::json!({ "error": "NOT_FOUND", "message": "App not found" }),
+        ));
+    }
+
+    // Try edit token first
+    if let Some(token) = edit_token {
+        let token_hash = hash_key(token);
+        let valid: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM apps WHERE id = ?1 AND edit_token_hash = ?2",
+                rusqlite::params![app_id, token_hash],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+
+        if valid {
+            return Ok(EditAccess::EditToken);
+        }
+    }
+
+    // Try API key
+    if let Some(key) = api_key {
+        if key.is_admin {
+            return Ok(EditAccess::Admin(key.id.clone()));
         }
 
-        // Try API key
-        if let Outcome::Success(api_key) = request.guard::<AuthenticatedKey>().await {
-            let conn = db.0.lock().map_err(|_| Status::InternalServerError)?;
+        let is_owner: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM apps WHERE id = ?1 AND submitted_by_key_id = ?2",
+                rusqlite::params![app_id, key.id],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
 
-            // Admin can edit anything
-            if api_key.is_admin {
-                return Ok(EditAuth {
-                    app_id: app_id.to_string(),
-                    via: EditAuthVia::Admin(api_key.id),
-                });
-            }
-
-            // Check if this API key created the app
-            let is_owner: bool = conn
-                .query_row(
-                    "SELECT COUNT(*) > 0 FROM apps WHERE id = ?1 AND submitted_by_key_id = ?2",
-                    rusqlite::params![app_id, api_key.id],
-                    |r| r.get(0),
-                )
-                .unwrap_or(false);
-
-            if is_owner {
-                return Ok(EditAuth {
-                    app_id: app_id.to_string(),
-                    via: EditAuthVia::ApiKey(api_key.id),
-                });
-            }
+        if is_owner {
+            return Ok(EditAccess::Owner(key.id.clone()));
         }
+    }
 
-        Err(Status::Forbidden)
+    // No valid auth
+    if edit_token.is_some() || api_key.is_some() {
+        Err((
+            Status::Forbidden,
+            serde_json::json!({ "error": "FORBIDDEN", "message": "You don't have permission to edit this app" }),
+        ))
+    } else {
+        Err((
+            Status::Unauthorized,
+            serde_json::json!({ "error": "UNAUTHORIZED", "message": "Edit token or API key required. Pass edit token via ?token= query param or X-Edit-Token header." }),
+        ))
     }
 }

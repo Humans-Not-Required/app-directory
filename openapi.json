@@ -248,6 +248,7 @@
       },
       "patch": {
         "summary": "Update app",
+        "description": "Update app details. Auth via edit token (?token= query param or X-Edit-Token header), API key (owner), or admin key. Edit tokens cannot change status, featured, or verified badges.",
         "operationId": "updateApp",
         "parameters": [
           {
@@ -257,9 +258,19 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "description": "Edit token returned on app creation",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "security": [
+          {},
           {
             "apiKey": []
           }
@@ -282,6 +293,7 @@
       "delete": {
         "summary": "Delete app",
         "operationId": "deleteApp",
+        "description": "Delete app and all associated data. Auth via edit token (?token= query param or X-Edit-Token header), API key (owner), or admin key.",
         "parameters": [
           {
             "name": "id",
@@ -290,9 +302,19 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "description": "Edit token returned on app creation",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "security": [
+          {},
           {
             "apiKey": []
           }
@@ -842,19 +864,12 @@
     "/events/stream": {
       "get": {
         "summary": "Real-time event stream (SSE)",
-        "description": "Server-Sent Events stream for real-time directory events. Emits events for app submissions, approvals, updates, deletions, reviews, and health checks. Sends a heartbeat every 15 seconds to keep connections alive.",
+        "description": "Server-Sent Events stream for real-time directory events. No auth required. Emits events for app submissions, approvals, updates, deletions, reviews, and health checks. Sends a heartbeat every 15 seconds to keep connections alive.",
         "operationId": "eventStream",
         "tags": [
           "events"
         ],
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "BearerAuth": []
-          }
-        ],
+        "security": [],
         "responses": {
           "200": {
             "description": "SSE event stream",
