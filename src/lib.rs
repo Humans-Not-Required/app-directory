@@ -66,7 +66,13 @@ pub fn rocket() -> rocket::Rocket<rocket::Build> {
     dotenvy::dotenv().ok();
 
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "app_directory.db".to_string());
-    let conn = db::init_db(&db_path);
+    rocket_with_path(&db_path)
+}
+
+/// Build a Rocket instance with the given database path.
+/// Prefer this over `rocket()` in tests to avoid process-global env var races.
+pub fn rocket_with_path(db_path: &str) -> rocket::Rocket<rocket::Build> {
+    let conn = db::init_db(db_path);
 
     // Create admin key if none exist
     let key_count: i64 = conn

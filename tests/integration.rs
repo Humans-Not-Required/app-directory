@@ -3,12 +3,17 @@ use rocket::local::blocking::Client;
 use serde_json::Value;
 
 fn setup_client() -> (Client, String) {
-    // Use a unique temp DB per test
-    let db_path = format!("/tmp/test_app_dir_{}.db", uuid::Uuid::new_v4());
-    std::env::set_var("DATABASE_PATH", &db_path);
+    let (client, key, _path) = setup_client_with_path();
+    (client, key)
+}
 
-    // Build the rocket client (this initializes the DB and creates a default admin key)
-    let rocket = app_directory::rocket();
+/// Build a test client and return the DB path for tests that need direct DB access.
+/// Uses `rocket_with_path` to avoid process-global env var races in parallel tests.
+fn setup_client_with_path() -> (Client, String, String) {
+    let db_path = format!("/tmp/test_app_dir_{}.db", uuid::Uuid::new_v4());
+
+    // Build the rocket client with the explicit DB path (no env var needed)
+    let rocket = app_directory::rocket_with_path(&db_path);
     let client = Client::tracked(rocket).expect("valid rocket instance");
 
     // Create a test admin key with a known value
@@ -16,7 +21,7 @@ fn setup_client() -> (Client, String) {
     let test_key = app_directory::auth::create_api_key(&conn, "test-admin", true, Some(10000));
     drop(conn);
 
-    (client, test_key)
+    (client, test_key, db_path)
 }
 
 #[test]
@@ -391,10 +396,8 @@ fn test_slugify() {
 fn test_rate_limiting() {
     // Create a client with a low-rate-limit key
     let db_path = format!("/tmp/test_app_dir_{}.db", uuid::Uuid::new_v4());
-    std::env::set_var("DATABASE_PATH", &db_path);
-    std::env::set_var("RATE_LIMIT_WINDOW_SECS", "60");
 
-    let rocket = app_directory::rocket();
+    let rocket = app_directory::rocket_with_path(&db_path);
     let client = Client::tracked(rocket).expect("valid rocket instance");
 
     // Create a low-rate-limit key
@@ -1046,7 +1049,7 @@ fn test_webhook_not_found() {
 
 #[test]
 fn test_schedule_endpoint() {
-    let (client, key) = setup_client();
+    let (client, key, db_path) = setup_client_with_path();
 
     // Admin can view schedule
     let response = client
@@ -1061,7 +1064,7 @@ fn test_schedule_endpoint() {
     assert_eq!(body["default_interval"], 300);
 
     // Non-admin cannot view schedule
-    let conn = rusqlite::Connection::open(std::env::var("DATABASE_PATH").unwrap()).unwrap();
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
     let viewer_key = app_directory::auth::create_api_key(&conn, "viewer", false, Some(100));
     drop(conn);
 
