@@ -190,8 +190,9 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 
 - [x] **Backend route decomposition** (commit fec920d) — Monolithic 1846-line `src/routes.rs` split into 6 focused modules under `src/routes/`: system (82), apps (758), reviews (169), keys (102), webhook_routes (293), admin (405), mod.rs (17). Extracted `app_row_to_json` helper. Zero clippy warnings. All 37 tests pass.
 - [x] **Parallel-safe tests** (commit fec920d) — Added `rocket_with_path()` to bypass env var races. Tests no longer need `--test-threads=1`. Parallel execution: 1.5s vs 4s sequential.
+- [x] **Edit token auth refactor** (commit 900402e) — `update_app` and `delete_app` now accept per-app edit tokens via `?token=` query param or `X-Edit-Token` header, in addition to API key (owner/admin). SSE event stream made public (no auth required). Added `EditTokenParam` request guard and `check_edit_access()` helper. Edit tokens cannot change admin-only fields (status, badges). Cross-app token validation prevents using one app's token on another. 11 new tests (48 total). Updated llms.txt and OpenAPI spec.
 
-**Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 37 tests pass.
+**Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers, **per-app edit tokens (no signup needed)**. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 48 tests pass.
 
 ### ⚠️ Gotchas
 
