@@ -1,6 +1,6 @@
 # App Directory - Status
 
-## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + Frontend ✅ + Unified Serving ✅ + README Complete ✅ + 36 Tests Passing ✅
+## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + Frontend ✅ + Unified Serving ✅ + README Complete ✅ + 88 Tests Passing ✅
 
 Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, app statistics with view tracking and trending, app deprecation workflow with replacement tracking and sunset dates, **React frontend with browse/search/submit/admin dashboard served from Rocket via unified serving**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
@@ -142,7 +142,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (3-stage: Node frontend → Rust backend → Debian slim runtime)
 - **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT, RATE_LIMIT_WINDOW_SECS, HEALTH_CHECK_INTERVAL_SECS, STATIC_DIR)
-- **Tests:** 36 tests passing (20 integration + 1 scheduler + 7 health check + 4 webhook + 4 rate limiter unit tests)
+- **Tests:** 88 tests passing (85 integration + 3 unit)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
 - **README:** Complete with setup, API reference, approval workflow, webhooks, health monitoring, scheduled checks docs, examples
 - **Deployment:** Single-port unified serving (API + frontend on same origin)
@@ -192,7 +192,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 - [x] **Parallel-safe tests** (commit fec920d) — Added `rocket_with_path()` to bypass env var races. Tests no longer need `--test-threads=1`. Parallel execution: 1.5s vs 4s sequential.
 - [x] **Edit token auth refactor** (commit 900402e) — `update_app` and `delete_app` now accept per-app edit tokens via `?token=` query param or `X-Edit-Token` header, in addition to API key (owner/admin). SSE event stream made public (no auth required). Added `EditTokenParam` request guard and `check_edit_access()` helper. Edit tokens cannot change admin-only fields (status, badges). Cross-app token validation prevents using one app's token on another. 11 new tests (48 total). Updated llms.txt and OpenAPI spec.
 
-**Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers, **per-app edit tokens (no signup needed)**. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 48 tests pass.
+**Consider deployable?** ✅ **YES — fully deployable.** Core API feature-complete: submit, discover, search, review, badges, health monitoring (manual + scheduled), webhooks, SSE real-time events, approval workflow, deprecation workflow with replacement tracking, app statistics with trending, rate limiting with headers, **per-app edit tokens (no signup needed)**. React frontend with browse/search/submit/admin/trending. Single port unified serving. 3-stage Docker build. README has setup instructions. 88 tests pass.
 
 ### ⚠️ Gotchas
 
@@ -277,3 +277,7 @@ Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate 
 <!-- WORK_QUEUE_DIRECTIONS_START -->
 - [x] App Directory: Hide admin link when not logged in — ✅ Done (622695a + enhanced admin panel 6c28080)
 <!-- WORK_QUEUE_DIRECTIONS_END -->
+
+### Completed (2026-02-16 Daytime, Session — 00:45 UTC)
+
+- **Expanded integration test coverage** ✅ Done — 40 new tests covering: pagination (page/per_page, beyond-data pages), sorting (name, oldest), filtering (category, protocol, status including rejected/all), slug-based lookup, /apps/mine endpoint, review upsert behavior, review for nonexistent app, review pagination, search with category filter, search pagination, search by tags, search no results, submission validation (missing name/description), anonymous submit response shape, approve/reject edge cases (already approved/rejected, empty reason, nonexistent app), pending list (empty since auto-approved), partial update field preservation, llms.txt/openapi.json/root llms.txt endpoints, delete cascade (reviews), deprecation with replacement + self-reference + undeprecate non-deprecated, key management (delete nonexistent, create response), webhook update, CORS preflight, health status initially null, complete response field verification. Test count: 48 → 88. Zero clippy warnings. Commit: d0f86b0.
