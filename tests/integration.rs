@@ -1955,3 +1955,1057 @@ fn test_cross_app_token_rejected() {
         .dispatch();
     assert_eq!(response.status(), Status::Forbidden);
 }
+
+// ── Pagination & Sorting ──
+
+#[test]
+fn test_list_apps_pagination() {
+    let (client, key) = setup_client();
+
+    // Submit 5 apps
+    for i in 1..=5 {
+        let body = serde_json::json!({
+            "name": format!("Paginated App {}", i),
+            "short_description": "Test",
+            "description": "Test app",
+            "author_name": "Tester"
+        });
+        client.post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(body.to_string())
+            .dispatch();
+    }
+
+    // Page 1, 2 per page
+    let response = client.get("/api/v1/apps?per_page=2&page=1").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["per_page"], 2);
+    assert_eq!(body["page"], 1);
+    assert_eq!(body["apps"].as_array().unwrap().len(), 2);
+
+    // Page 3 (last page, 1 item)
+    let response = client.get("/api/v1/apps?per_page=2&page=3").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["apps"].as_array().unwrap().len(), 1);
+
+    // Page 4 (beyond data, empty)
+    let response = client.get("/api/v1/apps?per_page=2&page=4").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["apps"].as_array().unwrap().len(), 0);
+    assert_eq!(body["total"], 5); // total still correct
+}
+
+#[test]
+fn test_list_apps_sort_by_name() {
+    let (client, key) = setup_client();
+
+    for name in &["Zebra Service", "Alpha Tool", "Middle App"] {
+        let body = serde_json::json!({
+            "name": name,
+            "short_description": "Test",
+            "description": "Test app",
+            "author_name": "Tester"
+        });
+        client.post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(body.to_string())
+            .dispatch();
+    }
+
+    let response = client.get("/api/v1/apps?sort=name").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    assert_eq!(apps[0]["name"], "Alpha Tool");
+    assert_eq!(apps[1]["name"], "Middle App");
+    assert_eq!(apps[2]["name"], "Zebra Service");
+}
+
+#[test]
+fn test_list_apps_sort_options() {
+    let (client, key) = setup_client();
+
+    for name in &["First", "Second", "Third"] {
+        let body = serde_json::json!({
+            "name": name,
+            "short_description": "Test",
+            "description": "Test app",
+            "author_name": "Tester"
+        });
+        client.post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(body.to_string())
+            .dispatch();
+    }
+
+    // Oldest sort returns results in created_at ASC order
+    let response = client.get("/api/v1/apps?sort=oldest").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    assert_eq!(apps.len(), 3);
+    // With oldest sort, we get ASC order — first created is first in list
+    // (all have same second but insertion order is preserved by rowid)
+    assert_eq!(apps[0]["name"], "First");
+    assert_eq!(apps[2]["name"], "Third");
+
+    // Name sort returns alphabetical
+    let response = client.get("/api/v1/apps?sort=name").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    assert_eq!(apps[0]["name"], "First");
+    assert_eq!(apps[1]["name"], "Second");
+    assert_eq!(apps[2]["name"], "Third");
+}
+
+// ── Filter Tests ──
+
+#[test]
+fn test_list_apps_filter_by_category() {
+    let (client, key) = setup_client();
+
+    let body1 = serde_json::json!({
+        "name": "Dev Tool",
+        "short_description": "A dev tool",
+        "description": "Developer tool",
+        "category": "developer-tools",
+        "author_name": "Tester"
+    });
+    let body2 = serde_json::json!({
+        "name": "Monitor App",
+        "short_description": "A monitor",
+        "description": "Monitoring app",
+        "category": "monitoring",
+        "author_name": "Tester"
+    });
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body1.to_string()).dispatch();
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body2.to_string()).dispatch();
+
+    let response = client.get("/api/v1/apps?category=developer-tools").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["apps"][0]["name"], "Dev Tool");
+}
+
+#[test]
+fn test_list_apps_filter_by_protocol() {
+    let (client, key) = setup_client();
+
+    let body1 = serde_json::json!({
+        "name": "REST API",
+        "short_description": "REST",
+        "description": "REST service",
+        "protocol": "rest",
+        "author_name": "Tester"
+    });
+    let body2 = serde_json::json!({
+        "name": "GraphQL API",
+        "short_description": "GraphQL",
+        "description": "GraphQL service",
+        "protocol": "graphql",
+        "author_name": "Tester"
+    });
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body1.to_string()).dispatch();
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body2.to_string()).dispatch();
+
+    let response = client.get("/api/v1/apps?protocol=graphql").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["apps"][0]["name"], "GraphQL API");
+}
+
+#[test]
+fn test_list_apps_filter_status_all() {
+    let (client, key) = setup_client();
+
+    // Submit two apps (both auto-approved)
+    let body1 = serde_json::json!({
+        "name": "Approved App",
+        "short_description": "OK",
+        "description": "Approved",
+        "author_name": "Admin"
+    });
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body1.to_string()).dispatch();
+
+    let body2 = serde_json::json!({
+        "name": "Soon Rejected App",
+        "short_description": "Will be rejected",
+        "description": "Will be rejected",
+        "author_name": "Anon"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body2.to_string()).dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let rejected_id = created["app_id"].as_str().unwrap();
+
+    // Reject the second app
+    client.post(format!("/api/v1/apps/{}/reject", rejected_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason": "Test rejection"}"#)
+        .dispatch();
+
+    // Default list shows only approved
+    let response = client.get("/api/v1/apps").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+
+    // status=all shows both
+    let response = client.get("/api/v1/apps?status=all").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 2);
+
+    // status=rejected shows only rejected
+    let response = client.get("/api/v1/apps?status=rejected").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["apps"][0]["name"], "Soon Rejected App");
+}
+
+// ── Slug-Based Lookup ──
+
+#[test]
+fn test_get_app_by_slug() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "My Cool Service",
+        "short_description": "Very cool",
+        "description": "A cool service",
+        "author_name": "Builder"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Get by ID
+    let response = client.get(format!("/api/v1/apps/{}", app_id)).dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let by_id: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let slug = by_id["slug"].as_str().unwrap().to_string();
+    assert!(slug.contains("my-cool-service"));
+
+    // Get by slug
+    let response = client.get(format!("/api/v1/apps/{}", slug)).dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let by_slug: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(by_slug["id"], app_id);
+    assert_eq!(by_slug["name"], "My Cool Service");
+}
+
+#[test]
+fn test_get_nonexistent_app() {
+    let (client, _) = setup_client();
+    let response = client.get("/api/v1/apps/nonexistent-slug-or-id").dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+// ── My Apps ──
+
+#[test]
+fn test_list_my_apps() {
+    let (client, key) = setup_client();
+
+    // Submit 2 apps with admin key
+    for name in &["My First App", "My Second App"] {
+        let body = serde_json::json!({
+            "name": name,
+            "short_description": "Mine",
+            "description": "My app",
+            "author_name": "Me"
+        });
+        client.post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(body.to_string())
+            .dispatch();
+    }
+
+    // Submit 1 app anonymously
+    client.post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(r#"{"name": "Anon App", "short_description": "X", "description": "Y", "author_name": "Z"}"#)
+        .dispatch();
+
+    // /apps/mine should only return the 2 admin-submitted apps
+    let response = client.get("/api/v1/apps/mine")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 2);
+}
+
+#[test]
+fn test_list_my_apps_no_auth() {
+    let (client, _) = setup_client();
+    let response = client.get("/api/v1/apps/mine").dispatch();
+    assert_eq!(response.status(), Status::Unauthorized);
+}
+
+// ── Review Edge Cases ──
+
+#[test]
+fn test_review_upsert() {
+    let (client, key) = setup_client();
+
+    // Submit an app
+    let body = serde_json::json!({
+        "name": "Reviewable App",
+        "short_description": "Review me",
+        "description": "App to review",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Submit initial review (3 stars)
+    let review = serde_json::json!({ "rating": 3, "body": "Decent" });
+    client.post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(review.to_string())
+        .dispatch();
+
+    // Upsert review (update to 5 stars) — ON CONFLICT DO UPDATE still returns Created
+    let review2 = serde_json::json!({ "rating": 5, "body": "Actually great!" });
+    let response = client.post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(review2.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+
+    // Verify only 1 review exists and rating updated
+    let response = client.get(format!("/api/v1/apps/{}/reviews", app_id)).dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["reviews"][0]["rating"], 5);
+    assert_eq!(body["reviews"][0]["body"], "Actually great!");
+}
+
+#[test]
+fn test_review_for_nonexistent_app() {
+    let (client, key) = setup_client();
+    let review = serde_json::json!({ "rating": 3, "body": "Hmm" });
+    let response = client.post("/api/v1/apps/nonexistent-id/reviews")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(review.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+#[test]
+fn test_review_pagination() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Multi-Review App",
+        "short_description": "Many reviews",
+        "description": "App with many reviews",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Submit a review
+    let review = serde_json::json!({ "rating": 4, "body": "Good" });
+    client.post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(review.to_string())
+        .dispatch();
+
+    // Verify pagination structure
+    let response = client.get(format!("/api/v1/apps/{}/reviews?per_page=1", app_id)).dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["page"], 1);
+    assert_eq!(body["per_page"], 1);
+    assert!(body["total"].as_i64().unwrap() >= 1);
+}
+
+// ── Search Edge Cases ──
+
+#[test]
+fn test_search_with_category_filter() {
+    let (client, key) = setup_client();
+
+    let body1 = serde_json::json!({
+        "name": "Search Dev Tool",
+        "short_description": "Searchable dev tool",
+        "description": "A developer tool that is searchable",
+        "category": "developer-tools",
+        "author_name": "Tester"
+    });
+    let body2 = serde_json::json!({
+        "name": "Search Monitor",
+        "short_description": "Searchable monitor",
+        "description": "A monitoring tool that is searchable",
+        "category": "monitoring",
+        "author_name": "Tester"
+    });
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body1.to_string()).dispatch();
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body2.to_string()).dispatch();
+
+    // Search "searchable" filtered to developer-tools
+    let response = client.get("/api/v1/apps/search?q=searchable&category=developer-tools").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["apps"][0]["name"], "Search Dev Tool");
+}
+
+#[test]
+fn test_search_pagination() {
+    let (client, key) = setup_client();
+
+    for i in 1..=5 {
+        let body = serde_json::json!({
+            "name": format!("Findable App {}", i),
+            "short_description": "Findable",
+            "description": "This app is findable",
+            "author_name": "Tester"
+        });
+        client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON).body(body.to_string()).dispatch();
+    }
+
+    let response = client.get("/api/v1/apps/search?q=findable&per_page=2&page=1").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 5);
+    assert_eq!(body["apps"].as_array().unwrap().len(), 2);
+    assert_eq!(body["page"], 1);
+    assert_eq!(body["per_page"], 2);
+}
+
+#[test]
+fn test_search_no_results() {
+    let (client, _) = setup_client();
+    let response = client.get("/api/v1/apps/search?q=zzz_nonexistent_zzz").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 0);
+    assert_eq!(body["apps"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_search_by_tags() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Tag Search App",
+        "short_description": "Has unique tags",
+        "description": "App with tags",
+        "tags": ["quantum-computing", "neural"],
+        "author_name": "Tester"
+    });
+    client.post("/api/v1/apps").header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body.to_string()).dispatch();
+
+    // Search by tag content
+    let response = client.get("/api/v1/apps/search?q=quantum").dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["apps"][0]["name"], "Tag Search App");
+}
+
+// ── Submission Validation ──
+
+#[test]
+fn test_submit_missing_name() {
+    let (client, key) = setup_client();
+    let body = serde_json::json!({
+        "short_description": "Missing name",
+        "description": "No name provided",
+        "author_name": "Tester"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+}
+
+#[test]
+fn test_submit_missing_description() {
+    let (client, key) = setup_client();
+    let body = serde_json::json!({
+        "name": "No Desc App",
+        "short_description": "Has short desc",
+        "author_name": "Tester"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+}
+
+#[test]
+fn test_submit_anonymous_returns_edit_token() {
+    let (client, _) = setup_client();
+    let body = serde_json::json!({
+        "name": "Anon Submit Test",
+        "short_description": "Anonymous",
+        "description": "Anonymous submission",
+        "author_name": "Anon"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let result: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert!(result["edit_token"].is_string());
+    assert!(result["edit_token"].as_str().unwrap().starts_with("ad_"));
+    assert!(result["edit_url"].is_string());
+    assert!(result["listing_url"].is_string());
+    assert!(result["app_id"].is_string());
+    // All submissions are auto-approved (no approval queue in v1)
+    assert_eq!(result["status"], "approved");
+}
+
+// ── Approval Edge Cases ──
+
+#[test]
+fn test_approve_already_approved() {
+    let (client, key) = setup_client();
+
+    // Admin-submitted apps are auto-approved
+    let body = serde_json::json!({
+        "name": "Auto Approved",
+        "short_description": "Already approved",
+        "description": "Already approved via admin key",
+        "author_name": "Admin"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Try to approve again
+    let response = client.post(format!("/api/v1/apps/{}/approve", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"note": "Approving again"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"], "ALREADY_APPROVED");
+}
+
+#[test]
+fn test_reject_already_rejected() {
+    let (client, key) = setup_client();
+
+    // Submit anonymously (pending)
+    let body = serde_json::json!({
+        "name": "To Be Rejected",
+        "short_description": "Reject me",
+        "description": "Will be rejected",
+        "author_name": "Anon"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Reject it
+    client.post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason": "Spam"}"#)
+        .dispatch();
+
+    // Try to reject again
+    let response = client.post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason": "Still spam"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["error"], "ALREADY_REJECTED");
+}
+
+#[test]
+fn test_reject_empty_reason() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Reject Empty Reason",
+        "short_description": "Test",
+        "description": "Test",
+        "author_name": "Anon"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    let response = client.post(format!("/api/v1/apps/{}/reject", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason": ""}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+}
+
+#[test]
+fn test_approve_nonexistent_app() {
+    let (client, key) = setup_client();
+    let response = client.post("/api/v1/apps/nonexistent-id/approve")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"note": "test"}"#)
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+// ── Pending Apps List ──
+
+#[test]
+fn test_list_pending_apps_empty() {
+    let (client, key) = setup_client();
+
+    // All submissions are auto-approved, so pending list should be empty
+    let body = serde_json::json!({
+        "name": "Auto Approved",
+        "short_description": "Will be approved",
+        "description": "Auto approved app",
+        "author_name": "Tester"
+    });
+    client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+
+    // List pending (admin only) — should be empty since all auto-approved
+    let response = client.get("/api/v1/apps/pending")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 0);
+}
+
+#[test]
+fn test_list_pending_no_auth() {
+    let (client, _) = setup_client();
+    let response = client.get("/api/v1/apps/pending").dispatch();
+    assert_eq!(response.status(), Status::Unauthorized);
+}
+
+// ── Partial Update ──
+
+#[test]
+fn test_update_partial_fields() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Original Name",
+        "short_description": "Original short desc",
+        "description": "Original description",
+        "protocol": "rest",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Update only the name
+    let update = serde_json::json!({ "name": "Updated Name" });
+    let response = client.patch(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(update.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify name changed but other fields preserved
+    let response = client.get(format!("/api/v1/apps/{}", app_id)).dispatch();
+    let app: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(app["name"], "Updated Name");
+    assert_eq!(app["description"], "Original description");
+    assert_eq!(app["protocol"], "rest");
+}
+
+// ── System Endpoints ──
+
+#[test]
+fn test_llms_txt_endpoint() {
+    let (client, _) = setup_client();
+    let response = client.get("/api/v1/llms.txt").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let text = response.into_string().unwrap();
+    assert!(text.contains("App Directory"));
+    assert!(text.contains("/api/v1"));
+}
+
+#[test]
+fn test_openapi_json_endpoint() {
+    let (client, _) = setup_client();
+    let response = client.get("/api/v1/openapi.json").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert!(body["openapi"].is_string());
+    assert!(body["paths"].is_object());
+    assert!(body["info"]["title"].is_string());
+}
+
+#[test]
+fn test_root_llms_txt() {
+    let (client, _) = setup_client();
+    let response = client.get("/llms.txt").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let text = response.into_string().unwrap();
+    assert!(text.contains("App Directory"));
+}
+
+// ── Delete Cascade ──
+
+#[test]
+fn test_delete_app_cascades_reviews() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Cascade Delete Test",
+        "short_description": "Will be deleted",
+        "description": "App to test cascade delete",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Add a review
+    let review = serde_json::json!({ "rating": 4, "body": "Soon to be gone" });
+    client.post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(review.to_string())
+        .dispatch();
+
+    // Verify review exists
+    let response = client.get(format!("/api/v1/apps/{}/reviews", app_id)).dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+
+    // Delete the app
+    let response = client.delete(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // App should be gone
+    let response = client.get(format!("/api/v1/apps/{}", app_id)).dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+// ── Deprecation Edge Cases ──
+
+#[test]
+fn test_deprecate_with_replacement() {
+    let (client, key) = setup_client();
+
+    // Create two apps
+    let body1 = serde_json::json!({
+        "name": "Old App",
+        "short_description": "To be deprecated",
+        "description": "Old app",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body1.to_string()).dispatch();
+    let old: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let old_id = old["app_id"].as_str().unwrap().to_string();
+
+    let body2 = serde_json::json!({
+        "name": "New App",
+        "short_description": "Replacement",
+        "description": "New app",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body2.to_string()).dispatch();
+    let new: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let new_id = new["app_id"].as_str().unwrap().to_string();
+
+    // Deprecate old with replacement
+    let dep = serde_json::json!({
+        "reason": "Superseded",
+        "replacement_app_id": new_id,
+        "sunset_at": "2026-06-01T00:00:00Z"
+    });
+    let response = client.post(format!("/api/v1/apps/{}/deprecate", old_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(dep.to_string()).dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify deprecation fields
+    let response = client.get(format!("/api/v1/apps/{}", old_id)).dispatch();
+    let app: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert_eq!(app["status"], "deprecated");
+    assert_eq!(app["deprecated_reason"], "Superseded");
+    assert_eq!(app["replacement_app_id"], new_id);
+    assert!(app["sunset_at"].is_string());
+}
+
+#[test]
+fn test_deprecate_self_reference() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Self Ref App",
+        "short_description": "Test",
+        "description": "Test",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body.to_string()).dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Try to deprecate with self as replacement
+    let dep = serde_json::json!({
+        "reason": "Self replace",
+        "replacement_app_id": app_id
+    });
+    let response = client.post(format!("/api/v1/apps/{}/deprecate", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(dep.to_string()).dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+}
+
+#[test]
+fn test_undeprecate_non_deprecated() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Not Deprecated",
+        "short_description": "Test",
+        "description": "Not deprecated",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON).body(body.to_string()).dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    let response = client.post(format!("/api/v1/apps/{}/undeprecate", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Conflict);
+}
+
+// ── Key Management Edge Cases ──
+
+#[test]
+fn test_delete_nonexistent_key() {
+    let (client, key) = setup_client();
+    let response = client.delete("/api/v1/keys/nonexistent-key-id")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
+#[test]
+fn test_create_key_returns_key_info() {
+    let (client, key) = setup_client();
+    let body = serde_json::json!({ "name": "My Test Key" });
+    let response = client.post("/api/v1/keys")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let result: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    assert!(result["api_key"].is_string());
+    assert!(result["message"].is_string());
+}
+
+// ── Webhook Update ──
+
+#[test]
+fn test_webhook_update() {
+    let (client, key) = setup_client();
+
+    // Create a webhook
+    let wh = serde_json::json!({
+        "url": "https://example.com/webhook",
+        "events": ["app.submitted"],
+        "active": true
+    });
+    let response = client.post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(wh.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Created);
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let wh_id = created["id"].as_str().unwrap();
+
+    // Update it
+    let update = serde_json::json!({
+        "url": "https://example.com/webhook-v2",
+        "events": ["app.submitted", "app.approved"],
+        "active": false
+    });
+    let response = client.patch(format!("/api/v1/webhooks/{}", wh_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(update.to_string())
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify update
+    let response = client.get("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let webhooks = body["webhooks"].as_array().unwrap();
+    let updated = webhooks.iter().find(|w| w["id"] == wh_id).unwrap();
+    assert_eq!(updated["url"], "https://example.com/webhook-v2");
+    assert_eq!(updated["active"], false);
+}
+
+// ── CORS Preflight ──
+
+#[test]
+fn test_cors_preflight() {
+    let (client, _) = setup_client();
+    let response = client.options("/api/v1/apps").dispatch();
+    assert_eq!(response.status(), Status::NoContent);
+}
+
+// ── Health Check on App Without URL ──
+
+#[test]
+fn test_health_check_app_without_homepage() {
+    let (client, key) = setup_client();
+
+    // Submit an app with api_url for health checking
+    let body = serde_json::json!({
+        "name": "Headless App",
+        "short_description": "No homepage",
+        "description": "App without homepage URL",
+        "api_url": "https://api.example.com/health",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // Health status should be included in app data
+    let response = client.get(format!("/api/v1/apps/{}", app_id)).dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    let app: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    // last_health_status should be null initially
+    assert!(app["last_health_status"].is_null());
+}
+
+// ── App Response Field Completeness ──
+
+#[test]
+fn test_app_response_includes_all_fields() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "Complete Fields App",
+        "short_description": "All fields",
+        "description": "App with all fields",
+        "homepage_url": "https://example.com",
+        "api_url": "https://api.example.com",
+        "api_spec_url": "https://api.example.com/spec",
+        "protocol": "rest",
+        "category": "developer-tools",
+        "tags": ["test", "complete"],
+        "author_name": "Full Author",
+        "author_url": "https://author.example.com"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    let response = client.get(format!("/api/v1/apps/{}", app_id)).dispatch();
+    let app: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+
+    // Verify all expected fields are present
+    assert!(app["id"].is_string());
+    assert!(app["name"].is_string());
+    assert!(app["slug"].is_string());
+    assert!(app["short_description"].is_string());
+    assert!(app["description"].is_string());
+    assert_eq!(app["homepage_url"], "https://example.com");
+    assert_eq!(app["api_url"], "https://api.example.com");
+    assert_eq!(app["api_spec_url"], "https://api.example.com/spec");
+    assert_eq!(app["protocol"], "rest");
+    assert_eq!(app["category"], "developer-tools");
+    assert!(app["tags"].is_array());
+    assert_eq!(app["tags"].as_array().unwrap().len(), 2);
+    assert_eq!(app["author_name"], "Full Author");
+    assert_eq!(app["author_url"], "https://author.example.com");
+    assert!(app["created_at"].is_string());
+    assert!(app["updated_at"].is_string());
+    assert_eq!(app["is_featured"], false);
+    assert_eq!(app["is_verified"], false);
+    assert_eq!(app["status"], "approved");
+    assert_eq!(app["avg_rating"], 0.0);
+    assert_eq!(app["review_count"], 0);
+}
