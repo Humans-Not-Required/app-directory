@@ -142,7 +142,7 @@
 - **Database:** SQLite with WAL mode, auto-creates admin key on first run
 - **Docker:** Dockerfile (3-stage: Node frontend → Rust backend → Debian slim runtime)
 - **Config:** Environment variables via `.env` / `dotenvy` (DATABASE_PATH, ROCKET_ADDRESS, ROCKET_PORT, RATE_LIMIT_WINDOW_SECS, HEALTH_CHECK_INTERVAL_SECS, STATIC_DIR)
-- **Tests:** 88 tests passing (85 integration + 3 unit)
+- **Tests:** 99 tests passing (96 integration + 3 unit)
 - **Code Quality:** Zero clippy warnings, cargo fmt clean
 - **README:** Complete with setup, API reference, approval workflow, webhooks, health monitoring, scheduled checks docs, examples
 - **Deployment:** Single-port unified serving (API + frontend on same origin)
@@ -281,3 +281,7 @@
 ### Completed (2026-02-16 Daytime, Session — 00:45 UTC)
 
 - **Expanded integration test coverage** ✅ Done — 40 new tests covering: pagination (page/per_page, beyond-data pages), sorting (name, oldest), filtering (category, protocol, status including rejected/all), slug-based lookup, /apps/mine endpoint, review upsert behavior, review for nonexistent app, review pagination, search with category filter, search pagination, search by tags, search no results, submission validation (missing name/description), anonymous submit response shape, approve/reject edge cases (already approved/rejected, empty reason, nonexistent app), pending list (empty since auto-approved), partial update field preservation, llms.txt/openapi.json/root llms.txt endpoints, delete cascade (reviews), deprecation with replacement + self-reference + undeprecate non-deprecated, key management (delete nonexistent, create response), webhook update, CORS preflight, health status initially null, complete response field verification. Test count: 48 → 88. Zero clippy warnings. Commit: d0f86b0.
+
+### Completed (2026-02-17 — 15:45 UTC)
+
+- **Fixed anonymous review bug** ✅ — Reviews submitted without an API key returned HTTP 500 due to `FOREIGN KEY (reviewer_key_id) REFERENCES api_keys(id)` constraint violation (code used "anonymous" as reviewer_key_id, which doesn't exist in api_keys). Fix: migrated reviews table to make `reviewer_key_id` nullable, removed FK constraint, added `reviewer_name` field. Anonymous reviews now always create new entries (multiple allowed per app). Authenticated reviews still upsert (one per key per app). Added reviewer_name to list endpoint responses. Python SDK updated (removed skip workaround, added reviewer_name parameter). 5 new tests (91 → 96 integration). Zero clippy warnings.

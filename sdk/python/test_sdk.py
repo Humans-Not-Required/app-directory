@@ -256,28 +256,19 @@ class TestBrowse(AppDirectoryTestCase):
 
 
 class TestReviews(AppDirectoryTestCase):
-    def _try_review(self, app_id: str, rating: int, **kwargs):
-        """Submit review, skip test if staging has DB migration issue."""
-        try:
-            return self.ad.submit_review(app_id, rating, **kwargs)
-        except ServerError as e:
-            if "DB_ERROR" in str(e) or e.status_code == 500:
-                self.skipTest("Reviews endpoint returning 500 on staging (known DB issue)")
-            raise
-
     def test_submit_review(self):
         app = self._submit()
-        result = self._try_review(app["id"], 5, title="Great!", body="Works perfectly")
+        result = self.ad.submit_review(app["id"], 5, title="Great!", body="Works perfectly")
         self.assertIn("id", result)
 
     def test_submit_review_minimal(self):
         app = self._submit()
-        result = self._try_review(app["id"], 3)
+        result = self.ad.submit_review(app["id"], 3)
         self.assertIn("id", result)
 
     def test_list_reviews(self):
         app = self._submit()
-        self._try_review(app["id"], 4, title="Good")
+        self.ad.submit_review(app["id"], 4, title="Good")
         reviews = self.ad.list_reviews(app["id"])
         self.assertIn("reviews", reviews)
         self.assertGreaterEqual(len(reviews["reviews"]), 1)
@@ -289,11 +280,20 @@ class TestReviews(AppDirectoryTestCase):
     def test_review_upsert(self):
         """Second review from same caller updates the existing one."""
         app = self._submit()
-        self._try_review(app["id"], 3, title="Okay")
-        self._try_review(app["id"], 5, title="Actually great")
+        self.ad.submit_review(app["id"], 3, title="Okay")
+        self.ad.submit_review(app["id"], 5, title="Actually great")
         reviews = self.ad.list_reviews(app["id"])
         self.assertEqual(len(reviews["reviews"]), 1)
         self.assertEqual(reviews["reviews"][0]["rating"], 5)
+
+    def test_review_has_reviewer_name(self):
+        """Reviews should include reviewer_name in the response."""
+        app = self._submit()
+        self.ad.submit_review(app["id"], 4, title="Named review")
+        reviews = self.ad.list_reviews(app["id"])
+        self.assertGreaterEqual(len(reviews["reviews"]), 1)
+        # reviewer_name should be present (may be "anonymous" or None for anonymous)
+        self.assertIn("reviewer_name", reviews["reviews"][0])
 
 
 # =========================================================================

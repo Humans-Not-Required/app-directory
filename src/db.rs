@@ -47,14 +47,13 @@ pub fn init_db(path: &str) -> Connection {
         CREATE TABLE IF NOT EXISTS reviews (
             id TEXT PRIMARY KEY,
             app_id TEXT NOT NULL,
-            reviewer_key_id TEXT NOT NULL,
+            reviewer_key_id TEXT,
+            reviewer_name TEXT,
             rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
             title TEXT,
             body TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            FOREIGN KEY (app_id) REFERENCES apps(id),
-            FOREIGN KEY (reviewer_key_id) REFERENCES api_keys(id),
-            UNIQUE(app_id, reviewer_key_id)
+            FOREIGN KEY (app_id) REFERENCES apps(id)
         );
 
         CREATE TABLE IF NOT EXISTS health_checks (
@@ -87,6 +86,8 @@ pub fn init_db(path: &str) -> Connection {
         CREATE INDEX IF NOT EXISTS idx_apps_status ON apps(status);
         CREATE INDEX IF NOT EXISTS idx_apps_slug ON apps(slug);
         CREATE INDEX IF NOT EXISTS idx_reviews_app ON reviews(app_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_unique_key
+            ON reviews(app_id, reviewer_key_id) WHERE reviewer_key_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_health_checks_app ON health_checks(app_id);
         CREATE INDEX IF NOT EXISTS idx_health_checks_checked_at ON health_checks(checked_at);
 
@@ -230,6 +231,44 @@ pub fn init_db(path: &str) -> Connection {
         )
         .expect("Failed to migrate apps table");
         println!("✓ Migration complete");
+    }
+
+    // Migration: fix reviews table — remove broken FK on reviewer_key_id,
+    // make nullable for anonymous reviews, add reviewer_name field
+    let has_reviewer_name: bool = conn
+        .prepare("SELECT reviewer_name FROM reviews LIMIT 0")
+        .is_ok();
+    if !has_reviewer_name {
+        println!("⚠️  Migrating reviews table (nullable reviewer_key_id, add reviewer_name)...");
+        conn.execute_batch(
+            "BEGIN TRANSACTION;
+
+             CREATE TABLE reviews_new (
+                id TEXT PRIMARY KEY,
+                app_id TEXT NOT NULL,
+                reviewer_key_id TEXT,
+                reviewer_name TEXT,
+                rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+                title TEXT,
+                body TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (app_id) REFERENCES apps(id)
+             );
+
+             INSERT INTO reviews_new (id, app_id, reviewer_key_id, rating, title, body, created_at)
+                SELECT id, app_id, reviewer_key_id, rating, title, body, created_at FROM reviews;
+
+             DROP TABLE reviews;
+             ALTER TABLE reviews_new RENAME TO reviews;
+
+             CREATE INDEX idx_reviews_app ON reviews(app_id);
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_unique_key
+                ON reviews(app_id, reviewer_key_id) WHERE reviewer_key_id IS NOT NULL;
+
+             COMMIT;",
+        )
+        .expect("Failed to migrate reviews table");
+        println!("✓ Reviews migration complete");
     }
 
     conn

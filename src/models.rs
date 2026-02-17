@@ -98,6 +98,7 @@ pub struct SubmitReviewRequest {
     pub rating: i64,
     pub title: Option<String>,
     pub body: Option<String>,
+    pub reviewer_name: Option<String>,
 }
 
 // === Search / List Models ===

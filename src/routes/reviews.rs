@@ -43,20 +43,45 @@ pub fn submit_review(
     }
 
     let id = uuid::Uuid::new_v4().to_string();
-    let reviewer_id = opt_key.0.as_ref().map(|k| k.id.as_str()).unwrap_or("anonymous");
+    let reviewer_key_id: Option<String> = opt_key.0.as_ref().map(|k| k.id.clone());
+    let reviewer_name = body.reviewer_name.as_deref().unwrap_or("anonymous");
 
-    let result = conn.execute(
-        "INSERT INTO reviews (id, app_id, reviewer_key_id, rating, title, body)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(app_id, reviewer_key_id) DO UPDATE SET
-           rating = excluded.rating,
-           title = excluded.title,
-           body = excluded.body,
-           created_at = datetime('now')",
-        rusqlite::params![id, app_id, reviewer_id, body.rating, body.title, body.body],
-    );
+    // If authenticated, upsert (one review per key per app).
+    // If anonymous, always insert a new review.
+    let result = if let Some(ref key_id) = reviewer_key_id {
+        // Check for existing review by this key on this app
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM reviews WHERE app_id = ?1 AND reviewer_key_id = ?2",
+                rusqlite::params![app_id, key_id],
+                |r| r.get(0),
+            )
+            .ok();
 
-    if result.is_err() {
+        if let Some(existing_id) = existing {
+            // Update existing review
+            conn.execute(
+                "UPDATE reviews SET rating = ?1, title = ?2, body = ?3, reviewer_name = ?4,
+                 created_at = datetime('now') WHERE id = ?5",
+                rusqlite::params![body.rating, body.title, body.body, reviewer_name, existing_id],
+            )
+        } else {
+            conn.execute(
+                "INSERT INTO reviews (id, app_id, reviewer_key_id, reviewer_name, rating, title, body)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![id, app_id, key_id, reviewer_name, body.rating, body.title, body.body],
+            )
+        }
+    } else {
+        conn.execute(
+            "INSERT INTO reviews (id, app_id, reviewer_key_id, reviewer_name, rating, title, body)
+             VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, app_id, reviewer_name, body.rating, body.title, body.body],
+        )
+    };
+
+    if let Err(e) = &result {
+        eprintln!("Review insert error: {e}");
         return (
             Status::InternalServerError,
             Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
@@ -108,27 +133,28 @@ pub fn get_reviews(
         )
         .unwrap_or(0);
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, app_id, rating, title, body, created_at
-             FROM reviews WHERE app_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
-        )
-        .unwrap();
-
-    let reviews: Vec<Value> = stmt
-        .query_map(rusqlite::params![app_id, per_page, offset], |row| {
-            Ok(json!({
-                "id": row.get::<_, String>(0)?,
-                "app_id": row.get::<_, String>(1)?,
-                "rating": row.get::<_, i64>(2)?,
-                "title": row.get::<_, Option<String>>(3)?,
-                "body": row.get::<_, Option<String>>(4)?,
-                "created_at": row.get::<_, String>(5)?,
-            }))
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect();
+    let reviews: Vec<Value> = match conn.prepare(
+        "SELECT id, app_id, rating, title, body, created_at, reviewer_name
+         FROM reviews WHERE app_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+    ) {
+        Ok(mut stmt) => {
+            match stmt.query_map(rusqlite::params![app_id, per_page, offset], |row| {
+                Ok(json!({
+                    "id": row.get::<_, String>(0)?,
+                    "app_id": row.get::<_, String>(1)?,
+                    "rating": row.get::<_, i64>(2)?,
+                    "title": row.get::<_, Option<String>>(3)?,
+                    "body": row.get::<_, Option<String>>(4)?,
+                    "created_at": row.get::<_, String>(5)?,
+                    "reviewer_name": row.get::<_, Option<String>>(6)?,
+                }))
+            }) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => Vec::new(),
+            }
+        }
+        Err(_) => Vec::new(),
+    };
 
     Json(json!({
         "reviews": reviews,

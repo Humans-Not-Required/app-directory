@@ -3077,3 +3077,161 @@ fn test_skills_skill_md() {
     assert!(body.contains("Categories"), "Missing categories section");
     assert!(body.contains("Reviews"), "Missing reviews section");
 }
+
+// ── Anonymous Review Bug Fix ──
+
+#[test]
+fn test_anonymous_review_submit() {
+    let (client, key) = setup_client();
+
+    // Create an app
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Anon Review App","short_description":"Test","description":"Testing anonymous reviews","author_name":"Tester"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let app_id = body["app_id"].as_str().unwrap();
+
+    // Submit review WITHOUT auth (anonymous)
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5,"title":"Great!","body":"Works perfectly","reviewer_name":"Agent42"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created, "Anonymous review should succeed");
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["id"].is_string());
+
+    // Verify review appears in listing
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", app_id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["reviews"][0]["rating"], 5);
+    assert_eq!(body["reviews"][0]["reviewer_name"], "Agent42");
+}
+
+#[test]
+fn test_multiple_anonymous_reviews_allowed() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Multi Review App","short_description":"Test","description":"Testing multiple anonymous reviews","author_name":"Tester"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let app_id = body["app_id"].as_str().unwrap();
+
+    // Submit 3 anonymous reviews
+    for rating in [5, 3, 4] {
+        let resp = client
+            .post(format!("/api/v1/apps/{}/reviews", app_id))
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"rating":{},"reviewer_name":"anon"}}"#, rating))
+            .dispatch();
+        assert_eq!(resp.status(), Status::Created);
+    }
+
+    // All 3 should be present
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", app_id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["total"], 3);
+
+    // avg_rating should reflect all 3
+    let resp = client
+        .get(format!("/api/v1/apps/{}", app_id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["review_count"], 3);
+    // (5+3+4)/3 = 4.0
+    assert!((body["avg_rating"].as_f64().unwrap() - 4.0).abs() < 0.01);
+}
+
+#[test]
+fn test_anonymous_review_default_reviewer_name() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Default Name App","short_description":"Test","description":"Test default reviewer name","author_name":"Tester"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let app_id = body["app_id"].as_str().unwrap();
+
+    // Submit without reviewer_name
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":4}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Check reviewer_name defaults to "anonymous"
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", app_id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["reviews"][0]["reviewer_name"], "anonymous");
+}
+
+#[test]
+fn test_authenticated_review_upsert_still_works() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Upsert Test App","short_description":"Test","description":"Test authenticated upsert","author_name":"Tester"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let app_id = body["app_id"].as_str().unwrap();
+
+    // Submit review with auth
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":3,"title":"Okay","reviewer_name":"TestUser"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Submit again with same key — should update, not create duplicate
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5,"title":"Actually great","reviewer_name":"TestUser"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Should still be only 1 review
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", app_id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["reviews"][0]["rating"], 5);
+    assert_eq!(body["reviews"][0]["title"], "Actually great");
+}
+
+#[test]
+fn test_review_nonexistent_app_anonymous() {
+    let (client, _) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps/nonexistent-id/reviews")
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+}

@@ -506,20 +506,25 @@ class AppDirectory:
         *,
         title: Optional[str] = None,
         body: Optional[str] = None,
+        reviewer_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """``POST /api/v1/apps/{id}/reviews`` — submit or update a review.
 
-        Reviews are upserted — same caller updates their existing review.
+        Authenticated reviews are upserted (same API key updates existing).
+        Anonymous reviews always create new entries.
 
         Args:
             app_id: App UUID.
             rating: 1–5 stars.
             title: Review title.
             body: Review text.
+            reviewer_name: Display name for the reviewer (defaults to "anonymous").
         """
         payload: Dict[str, Any] = {"rating": rating}
         if title is not None:
             payload["title"] = title
+        if reviewer_name is not None:
+            payload["reviewer_name"] = reviewer_name
         if body is not None:
             payload["body"] = body
         return self._request("POST", f"/api/v1/apps/{app_id}/reviews", json_body=payload)
