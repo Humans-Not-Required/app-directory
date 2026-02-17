@@ -3009,3 +3009,33 @@ fn test_app_response_includes_all_fields() {
     assert_eq!(app["avg_rating"], 0.0);
     assert_eq!(app["review_count"], 0);
 }
+
+// ── Well-Known Skills Discovery ──
+
+#[test]
+fn test_skills_index_json() {
+    let (client, _) = setup_client();
+    let resp = client.get("/.well-known/skills/index.json").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: serde_json::Value = resp.into_json().unwrap();
+    let skills = body["skills"].as_array().unwrap();
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0]["name"], "app-directory");
+    assert!(skills[0]["description"].as_str().unwrap().contains("agent"));
+    let files = skills[0]["files"].as_array().unwrap();
+    assert!(files.contains(&serde_json::json!("SKILL.md")));
+}
+
+#[test]
+fn test_skills_skill_md() {
+    let (client, _) = setup_client();
+    let resp = client.get("/.well-known/skills/app-directory/SKILL.md").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body = resp.into_string().unwrap();
+    assert!(body.starts_with("---"), "Missing YAML frontmatter");
+    assert!(body.contains("name: app-directory"), "Missing skill name");
+    assert!(body.contains("## Quick Start"), "Missing Quick Start");
+    assert!(body.contains("## Auth Model"), "Missing Auth Model");
+    assert!(body.contains("Categories"), "Missing categories section");
+    assert!(body.contains("Reviews"), "Missing reviews section");
+}

@@ -95,3 +95,7 @@ Full spec: GET /api/v1/openapi.json
 
 ## Source
 https://github.com/Humans-Not-Required/app-directory
+
+## Agent Skills Discovery
+- GET /.well-known/skills/index.json — skills discovery index (Cloudflare RFC)
+- GET /.well-known/skills/app-directory/SKILL.md — integration skill (agentskills.io format)

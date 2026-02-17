@@ -13,5 +13,5 @@ pub use apps::{
 };
 pub use keys::{create_key, delete_key, list_keys};
 pub use reviews::{get_reviews, list_categories, submit_review};
-pub use system::{cors_preflight, event_stream, health, llms_txt, openapi, root_llms_txt};
+pub use system::{cors_preflight, event_stream, health, llms_txt, openapi, root_llms_txt, skills_index, skills_skill_md};
 pub use webhook_routes::{create_webhook, delete_webhook, list_webhooks, update_webhook};

@@ -180,8 +180,12 @@ pub fn rocket_with_path(db_path: &str) -> rocket::Rocket<rocket::Build> {
             ],
         );
 
-    // Mount llms.txt at root level for standard discovery
-    rocket = rocket.mount("/", routes![routes::root_llms_txt]);
+    // Mount llms.txt + well-known skills at root level for standard discovery
+    rocket = rocket.mount("/", routes![
+        routes::root_llms_txt,
+        routes::skills_index,
+        routes::skills_skill_md,
+    ]);
 
     // Serve frontend static files if the directory exists
     if static_dir.is_dir() {
