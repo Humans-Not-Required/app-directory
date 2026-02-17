@@ -2746,6 +2746,44 @@ fn test_delete_app_cascades_reviews() {
     assert_eq!(response.status(), Status::NotFound);
 }
 
+#[test]
+fn test_delete_app_cascades_views_and_health_checks() {
+    let (client, key) = setup_client();
+
+    let body = serde_json::json!({
+        "name": "View Cascade Test",
+        "short_description": "Has views",
+        "description": "App with app_views to test cascade delete",
+        "author_name": "Author"
+    });
+    let response = client.post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(body.to_string())
+        .dispatch();
+    assert!(response.status() == Status::Ok || response.status() == Status::Created);
+    let created: Value = serde_json::from_str(&response.into_string().unwrap()).unwrap();
+    let app_id = created["app_id"].as_str().unwrap();
+
+    // View the app multiple times to create app_views entries
+    for _ in 0..3 {
+        let response = client.get(format!("/api/v1/apps/{}", app_id))
+            .header(Header::new("X-API-Key", key.clone()))
+            .dispatch();
+        assert_eq!(response.status(), Status::Ok);
+    }
+
+    // Delete should succeed despite app_views
+    let response = client.delete(format!("/api/v1/apps/{}", app_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(response.status(), Status::Ok);
+
+    // Verify app is gone
+    let response = client.get(format!("/api/v1/apps/{}", app_id)).dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+}
+
 // ── Deprecation Edge Cases ──
 
 #[test]

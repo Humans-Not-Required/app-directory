@@ -485,11 +485,10 @@ pub fn delete_app(
         Err((status, err)) => return (status, Json(err)),
     }
 
-    conn.execute(
-        "DELETE FROM reviews WHERE app_id = ?1",
-        rusqlite::params![id],
-    )
-    .ok();
+    // Clean up all dependent records before deleting the app
+    conn.execute("DELETE FROM reviews WHERE app_id = ?1", rusqlite::params![id]).ok();
+    conn.execute("DELETE FROM app_views WHERE app_id = ?1", rusqlite::params![id]).ok();
+    conn.execute("DELETE FROM health_checks WHERE app_id = ?1", rusqlite::params![id]).ok();
 
     match conn.execute("DELETE FROM apps WHERE id = ?1", rusqlite::params![id]) {
         Ok(1) => {
@@ -503,10 +502,13 @@ pub fn delete_app(
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
         ),
-        Err(_) => (
-            Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
-        ),
+        Err(e) => {
+            eprintln!("❌ Delete app {id} failed: {e}");
+            (
+                Status::InternalServerError,
+                Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
+            )
+        }
     }
 }
 
