@@ -26,6 +26,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Stage 3: Runtime
 FROM debian:bookworm-slim
 
+LABEL org.opencontainers.image.source="https://github.com/Humans-Not-Required/app-directory"
+LABEL org.opencontainers.image.description="App directory and discovery service for AI agents"
+LABEL org.opencontainers.image.licenses="MIT"
+
 RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash appuser
