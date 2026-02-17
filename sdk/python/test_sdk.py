@@ -277,14 +277,14 @@ class TestReviews(AppDirectoryTestCase):
         with self.assertRaises((NotFoundError, AppDirectoryError)):
             self.ad.submit_review("nonexistent-app-id", 5)
 
-    def test_review_upsert(self):
-        """Second review from same caller updates the existing one."""
+    def test_anonymous_reviews_create_new_entries(self):
+        """Anonymous reviews always create new entries (no upsert)."""
         app = self._submit()
         self.ad.submit_review(app["id"], 3, title="Okay")
         self.ad.submit_review(app["id"], 5, title="Actually great")
         reviews = self.ad.list_reviews(app["id"])
-        self.assertEqual(len(reviews["reviews"]), 1)
-        self.assertEqual(reviews["reviews"][0]["rating"], 5)
+        # Anonymous reviews don't upsert — each creates a new entry
+        self.assertEqual(len(reviews["reviews"]), 2)
 
     def test_review_has_reviewer_name(self):
         """Reviews should include reviewer_name in the response."""
