@@ -1449,6 +1449,34 @@
           }
         }
       }
+    },
+    "/.well-known/skills/index.json": {
+      "get": {
+        "summary": "Skills discovery index (Cloudflare RFC)",
+        "operationId": "getSkillsIndex",
+        "tags": [
+          "Discovery"
+        ],
+        "responses": {
+          "200": {
+            "description": "Skills index"
+          }
+        }
+      }
+    },
+    "/.well-known/skills/app-directory/SKILL.md": {
+      "get": {
+        "summary": "Integration skill document (agentskills.io format)",
+        "operationId": "getSkillMd",
+        "tags": [
+          "Discovery"
+        ],
+        "responses": {
+          "200": {
+            "description": "SKILL.md document"
+          }
+        }
+      }
     }
   },
   "components": {
