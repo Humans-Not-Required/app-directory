@@ -19,8 +19,35 @@ jobs:
       - run: cargo test -- --test-threads=1
         working-directory: .
 
-  build-and-push:
+  sdk-test:
     needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build server
+        run: cargo build --release
+      - name: Start server
+        run: |
+          ./target/release/app-directory &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/api/v1/health > /dev/null 2>&1 && break || sleep 1
+          done
+          curl -sf http://localhost:8000/api/v1/health
+      - name: Run Python SDK tests
+        env:
+          APP_DIRECTORY_URL: http://localhost:8000
+        run: cd sdk/python && python3 test_sdk.py
+      - name: Stop server
+        if: always()
+        run: kill ${{ env.SERVER_PID }} 2>/dev/null || true
+
+  build-and-push:
+    needs: [test, sdk-test]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
