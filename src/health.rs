@@ -29,7 +29,7 @@ pub async fn check_app_health(
 
     // Get app info (need api_url or homepage_url)
     let app_info = {
-        let conn = db.0.lock().unwrap();
+        let conn = db.conn();
         conn.query_row(
             "SELECT id, name, api_url, homepage_url FROM apps WHERE id = ?1 OR slug = ?1",
             rusqlite::params![app_id],
@@ -107,7 +107,7 @@ pub async fn check_app_health(
     // Record the health check and update app
     let check_id = uuid::Uuid::new_v4().to_string();
     {
-        let conn = db.0.lock().unwrap();
+        let conn = db.conn();
 
         // Insert health check record
         let _ = conn.execute(
@@ -192,7 +192,7 @@ pub async fn batch_health_check(
 
     // Get all approved apps with URLs
     let apps: Vec<(String, String, String)> = {
-        let conn = db.0.lock().unwrap();
+        let conn = db.conn();
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, COALESCE(api_url, homepage_url) as check_url
@@ -265,7 +265,7 @@ pub async fn batch_health_check(
         // Record the health check
         let check_id = uuid::Uuid::new_v4().to_string();
         {
-            let conn = db.0.lock().unwrap();
+            let conn = db.conn();
 
             let _ = conn.execute(
                 "INSERT INTO health_checks (id, app_id, status, status_code, response_time_ms, error_message, checked_url)
@@ -334,7 +334,7 @@ pub fn get_health_history(
     per_page: Option<i64>,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     // Resolve app ID (support slug lookup)
     let resolved_id: Result<String, _> = conn.query_row(
@@ -414,7 +414,7 @@ pub fn get_health_history(
 /// Health summary: overview of all apps' health status.
 #[get("/apps/health/summary")]
 pub fn health_summary(db: &rocket::State<DbState>) -> Json<Value> {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     // Get summary counts
     let total_apps: i64 = conn

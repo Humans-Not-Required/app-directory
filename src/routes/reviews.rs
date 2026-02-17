@@ -17,7 +17,7 @@ pub fn submit_review(
     db: &rocket::State<DbState>,
     bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     if body.rating < 1 || body.rating > 5 {
         return (
@@ -56,10 +56,10 @@ pub fn submit_review(
         rusqlite::params![id, app_id, reviewer_id, body.rating, body.title, body.body],
     );
 
-    if let Err(e) = result {
+    if result.is_err() {
         return (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         );
     }
 
@@ -94,7 +94,7 @@ pub fn get_reviews(
     per_page: Option<i64>,
     db: &rocket::State<DbState>,
 ) -> Json<Value> {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let page = page.unwrap_or(1).max(1);
     let per_page = per_page.unwrap_or(20).clamp(1, 100);
@@ -142,7 +142,7 @@ pub fn get_reviews(
 
 #[get("/categories")]
 pub fn list_categories(db: &rocket::State<DbState>) -> Json<Value> {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let mut stmt = conn
         .prepare(

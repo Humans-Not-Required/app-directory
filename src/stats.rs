@@ -22,7 +22,7 @@ pub fn get_app_stats(
     id: &str,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     // Check app exists
     let app_exists: bool = conn
@@ -111,7 +111,7 @@ pub fn trending_apps(
     limit: Option<i64>,
     db: &rocket::State<DbState>,
 ) -> Json<Value> {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let days = days.unwrap_or(7).clamp(1, 90);
     let limit = limit.unwrap_or(10).clamp(1, 50);

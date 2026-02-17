@@ -39,7 +39,7 @@ pub fn approve_app(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let current: Result<(String, String), _> = conn.query_row(
         "SELECT status, name FROM apps WHERE id = ?1",
@@ -102,9 +102,9 @@ pub fn approve_app(
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
         ),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -134,7 +134,7 @@ pub fn reject_app(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let current: Result<(String, String), _> = conn.query_row(
         "SELECT status, name FROM apps WHERE id = ?1",
@@ -198,9 +198,9 @@ pub fn reject_app(
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
         ),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -230,7 +230,7 @@ pub fn deprecate_app(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     if let Some(ref replacement_id) = body.replacement_app_id {
         let exists: bool = conn
@@ -320,9 +320,9 @@ pub fn deprecate_app(
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
         ),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -344,7 +344,7 @@ pub fn undeprecate_app(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let current: Result<(String, String), _> = conn.query_row(
         "SELECT status, name FROM apps WHERE id = ?1",
@@ -397,9 +397,9 @@ pub fn undeprecate_app(
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
         ),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }

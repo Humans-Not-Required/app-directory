@@ -17,7 +17,7 @@ pub fn list_keys(key: AuthenticatedKey, db: &rocket::State<DbState>) -> (Status,
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
     let mut stmt = conn
         .prepare(
             "SELECT id, name, is_admin, rate_limit, created_at FROM api_keys WHERE revoked = 0",
@@ -57,7 +57,7 @@ pub fn create_key(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
     let raw_key = auth::create_api_key(
         &conn,
         &body.name,
@@ -87,16 +87,16 @@ pub fn delete_key(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
     match conn.execute(
         "UPDATE api_keys SET revoked = 1 WHERE id = ?1",
         rusqlite::params![id],
     ) {
         Ok(1) => (Status::Ok, Json(json!({ "message": "Key revoked" }))),
         Ok(_) => (Status::NotFound, Json(json!({ "error": "NOT_FOUND" }))),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }

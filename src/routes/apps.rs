@@ -16,7 +16,7 @@ pub fn submit_app(
     db: &rocket::State<DbState>,
     bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let protocol = body.protocol.as_deref().unwrap_or("rest");
     if !VALID_PROTOCOLS.contains(&protocol) {
@@ -123,9 +123,9 @@ pub fn submit_app(
                 })),
             )
         }
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -148,7 +148,7 @@ pub fn list_apps(
     per_page: Option<i64>,
     db: &rocket::State<DbState>,
 ) -> Json<Value> {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let page = page.unwrap_or(1).max(1);
     let per_page = per_page.unwrap_or(20).clamp(1, 100);
@@ -250,7 +250,7 @@ pub fn get_app(
     id_or_slug: &str,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let result = conn.query_row(
         "SELECT id, name, slug, short_description, description, homepage_url, api_url, api_spec_url, protocol, category, tags, logo_url, author_name, author_url, status, is_featured, is_verified, avg_rating, review_count, created_at, updated_at, last_health_status, last_checked_at, uptime_pct, review_note, reviewed_by, reviewed_at, deprecated_reason, deprecated_by, deprecated_at, replacement_app_id, sunset_at
@@ -281,7 +281,7 @@ pub fn list_my_apps(
     key: AuthenticatedKey,
     db: &rocket::State<DbState>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let mut stmt = conn
         .prepare(
@@ -326,7 +326,7 @@ pub fn update_app(
     db: &rocket::State<DbState>,
     bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     // Check edit access via edit token, API key owner, or admin
     let access = match check_edit_access(&conn, id, &edit_token.0, &opt_key.0) {
@@ -460,9 +460,9 @@ pub fn update_app(
 
             (Status::Ok, Json(json!({ "message": "App updated" })))
         }
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -477,7 +477,7 @@ pub fn delete_app(
     db: &rocket::State<DbState>,
     bus: &rocket::State<EventBus>,
 ) -> (Status, Json<Value>) {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     // Check edit access via edit token, API key owner, or admin
     match check_edit_access(&conn, id, &edit_token.0, &opt_key.0) {
@@ -503,9 +503,9 @@ pub fn delete_app(
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "App not found" })),
         ),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -521,7 +521,7 @@ pub fn search_apps(
     per_page: Option<i64>,
     db: &rocket::State<DbState>,
 ) -> Json<Value> {
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let page = page.unwrap_or(1).max(1);
     let per_page = per_page.unwrap_or(20).clamp(1, 100);
@@ -617,7 +617,7 @@ pub fn list_pending_apps(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let page = page.unwrap_or(1).max(1);
     let per_page = per_page.unwrap_or(20).clamp(1, 100);

@@ -51,6 +51,15 @@ impl Fairing for Cors {
 
 pub struct DbState(pub Mutex<rusqlite::Connection>);
 
+impl DbState {
+    /// Get a database connection with mutex poison recovery.
+    /// If a previous request panicked while holding the lock, this recovers
+    /// gracefully instead of propagating the panic to all subsequent requests.
+    pub fn conn(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// SPA catch-all: serves index.html for any unmatched GET (client-side routing)
 #[get("/<_..>", rank = 20)]
 pub async fn spa_fallback() -> Option<rocket::fs::NamedFile> {

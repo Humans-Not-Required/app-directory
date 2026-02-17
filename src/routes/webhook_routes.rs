@@ -80,7 +80,7 @@ pub fn create_webhook(
         }
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
     let id = uuid::Uuid::new_v4().to_string();
     let secret = format!(
         "whsec_{}",
@@ -105,9 +105,9 @@ pub fn create_webhook(
                 secret: Some(secret),
             })),
         ),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -122,7 +122,7 @@ pub fn list_webhooks(key: AuthenticatedKey, db: &rocket::State<DbState>) -> (Sta
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
     let mut stmt = conn
         .prepare(
             "SELECT id, url, events, active, failure_count, last_triggered_at, created_at
@@ -167,7 +167,7 @@ pub fn update_webhook(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
 
     let exists: bool = conn
         .query_row(
@@ -254,9 +254,9 @@ pub fn update_webhook(
 
     match result {
         Ok(wh) => (Status::Ok, Json(json!(wh))),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
@@ -275,7 +275,7 @@ pub fn delete_webhook(
         );
     }
 
-    let conn = db.0.lock().unwrap();
+    let conn = db.conn();
     match conn.execute(
         "DELETE FROM webhooks WHERE id = ?1",
         rusqlite::params![webhook_id],
@@ -285,9 +285,9 @@ pub fn delete_webhook(
             Status::NotFound,
             Json(json!({ "error": "NOT_FOUND", "message": "Webhook not found" })),
         ),
-        Err(e) => (
+        Err(_) => (
             Status::InternalServerError,
-            Json(json!({ "error": "DB_ERROR", "message": e.to_string() })),
+            Json(json!({ "error": "DB_ERROR", "message": "Internal server error" })),
         ),
     }
 }
