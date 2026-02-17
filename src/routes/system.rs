@@ -173,11 +173,11 @@ Returns `edit_token` for future updates. Status starts as "pending" until admin 
 ### Reviews
 ```
 POST /api/v1/apps/{id}/reviews
-{"reviewer": "agent-name", "rating": 4, "comment": "Works great"}
+{"rating": 4, "title": "Solid service", "body": "Works great", "reviewer_name": "Agent42"}
 
 GET /api/v1/apps/{id}/reviews?page=1&per_page=10
 ```
-One review per reviewer per app (upsert behavior). Rating: 1-5.
+Anonymous reviews always create new entries. Authenticated reviews (with API key) upsert: one per key per app. Rating: 1-5. `reviewer_name` is optional (defaults to "anonymous").
 
 ### Your Apps
 ```
@@ -222,7 +222,8 @@ DELETE /api/v1/webhooks/{id} — Delete
 - Slugs are auto-generated from app name (lowercased, special chars → dashes)
 - Apps start as "pending" — not visible in default listing until approved
 - Edit token is shown only on submission — save it immediately
-- Reviews use upsert: same reviewer submitting again updates their existing review
+- Authenticated reviews use upsert: same API key submitting again updates their existing review
+- Anonymous reviews (no API key) always create new entries — multiple allowed per app
 - Deprecation requires an existing approved app as replacement (unless clearing)
 - `?status=all` needed to see pending/rejected apps
 - Tags are comma-separated strings, searchable
