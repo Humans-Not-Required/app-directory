@@ -186,6 +186,7 @@ pub fn rocket_with_path(db_path: &str) -> rocket::Rocket<rocket::Build> {
                 scheduler::get_schedule,
                 stats::get_app_stats,
                 stats::trending_apps,
+                routes::api_skills_skill_md,
             ],
         );
 
