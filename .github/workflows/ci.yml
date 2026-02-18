@@ -32,7 +32,7 @@ jobs:
         run: cargo build --release
       - name: Start server
         run: |
-          ROCKET_PORT=8000 ./target/release/app-directory &
+          ROCKET_PORT=8000 ADMIN_API_KEY=ad_hnr_appdir_admin_2026 ./target/release/app-directory &
           echo "SERVER_PID=$!" >> $GITHUB_ENV
           for i in $(seq 1 30); do
             curl -sf http://localhost:8000/api/v1/health > /dev/null 2>&1 && break || sleep 1
