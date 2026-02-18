@@ -736,6 +736,16 @@ class AppDirectory:
         data = self._request("GET", "/.well-known/skills/app-directory/SKILL.md")
         return data.decode() if isinstance(data, bytes) else str(data)
 
+    def llms_txt_root(self) -> str:
+        """``GET /llms.txt`` — root-level AI-readable API summary."""
+        data = self._request("GET", "/llms.txt")
+        return data.decode() if isinstance(data, bytes) else str(data)
+
+    def skill_md_v1(self) -> str:
+        """``GET /api/v1/skills/SKILL.md`` — API-level skill discovery."""
+        data = self._request("GET", "/api/v1/skills/SKILL.md")
+        return data.decode() if isinstance(data, bytes) else str(data)
+
     # ------------------------------------------------------------------
     # Convenience
     # ------------------------------------------------------------------

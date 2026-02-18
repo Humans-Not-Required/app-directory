@@ -1206,6 +1206,159 @@ class TestUnicode(AppDirectoryTestCase):
         self.assertGreaterEqual(len(reviews["reviews"]), 1)
 
 
+# ── Dual Discovery Path Tests ─────────────────────────────────────────
+
+
+class TestDualDiscovery(AppDirectoryTestCase):
+    """Tests for dual discovery path consistency."""
+
+    def test_llms_txt_root_path(self):
+        txt = self.ad.llms_txt_root()
+        self.assertIn("app", txt.lower())
+        self.assertGreater(len(txt), 50)
+
+    def test_llms_txt_root_and_v1_both_work(self):
+        root = self.ad.llms_txt_root()
+        v1 = self.ad.llms_txt()
+        self.assertGreater(len(root), 50)
+        self.assertGreater(len(v1), 50)
+
+    def test_skill_md_v1_path(self):
+        md = self.ad.skill_md_v1()
+        self.assertIn("app", md.lower())
+
+    def test_skill_md_both_paths_match(self):
+        wk = self.ad.skill_md()
+        v1 = self.ad.skill_md_v1()
+        self.assertEqual(wk, v1)
+
+
+# ── Cross-Feature Interaction Tests ──────────────────────────────────
+
+
+class TestCrossFeature(AppDirectoryTestCase):
+    """Tests for interactions between features."""
+
+    def test_submit_then_search_by_name(self):
+        name = unique_name("Searchable-App")
+        app = self._submit(name=name)
+        results = self.ad.search("Searchable")
+        names = [a["name"] for a in results.get("apps", results.get("results", []))]
+        self.assertIn(name, names)
+
+    def test_submit_review_then_check_stats(self):
+        app = self._submit()
+        self.ad.submit_review(app["id"], 4, title="Good app")
+        stats = self.ad.app_stats(app["id"])
+        # Stats might not include review_count; just verify no error
+        self.assertIsNotNone(stats)
+
+    def test_get_app_after_update(self):
+        app = self._submit()
+        token = app.get("edit_token", "")
+        ad2 = AppDirectory(BASE_URL, edit_token=token, api_key=ADMIN_KEY)
+        ad2.update_app(app["id"], description="Updated desc")
+        fetched = self.ad.get_app(app["id"])
+        self.assertEqual(fetched["description"], "Updated desc")
+
+    def test_list_includes_submitted(self):
+        app = self._submit()
+        apps = self.ad.list_apps()
+        ids = [a["id"] for a in apps.get("apps", apps.get("results", []))]
+        self.assertIn(app["id"], ids)
+
+    def test_submit_get_delete_verify(self):
+        app = self._submit()
+        self.ad.get_app(app["id"])
+        token = app.get("edit_token", "")
+        ad2 = AppDirectory(BASE_URL, edit_token=token, api_key=ADMIN_KEY)
+        ad2.delete_app(app["id"])
+        # Remove from cleanup list since we already deleted
+        self.__class__._app_ids = [(i, t) for i, t in self.__class__._app_ids if i != app["id"]]
+        with self.assertRaises(NotFoundError):
+            self.ad.get_app(app["id"])
+
+
+# ── Edge Cases ────────────────────────────────────────────────────────
+
+
+class TestEdgeCases(AppDirectoryTestCase):
+    """Edge cases and boundary conditions."""
+
+    def test_empty_description(self):
+        app = self._submit(description="")
+        fetched = self.ad.get_app(app["id"])
+        self.assertEqual(fetched.get("description", ""), "")
+
+    def test_many_tags(self):
+        tags = [f"tag-{i}" for i in range(10)]
+        app = self._submit(tags=tags)
+        fetched = self.ad.get_app(app["id"])
+        self.assertEqual(len(fetched.get("tags", [])), 10)
+
+    def test_long_name(self):
+        name = unique_name("A" * 200)
+        app = self._submit(name=name)
+        fetched = self.ad.get_app(app["id"])
+        self.assertTrue(len(fetched["name"]) > 0)
+
+    def test_search_special_chars(self):
+        results = self.ad.search("@#$%^&*")
+        # Should not error, just return empty or partial
+        self.assertIsNotNone(results)
+
+    def test_get_app_by_slug_after_submit(self):
+        name = unique_name("Slug-Test")
+        app = self._submit(name=name)
+        slug = app.get("slug", "")
+        if slug:
+            fetched = self.ad.get_app(slug)
+            self.assertEqual(fetched["id"], app["id"])
+
+    def test_submit_all_protocols(self):
+        for proto in ["rest", "graphql", "grpc", "websocket", "mcp"]:
+            app = self._submit(name=unique_name(f"Proto-{proto}"), protocol=proto)
+            fetched = self.ad.get_app(app["id"])
+            self.assertEqual(fetched.get("protocol", ""), proto)
+
+    def test_submit_various_categories(self):
+        cats = self.ad.categories()
+        cat_names = [c["name"] if isinstance(c, dict) else c for c in cats.get("categories", cats) if c]
+        for cat in cat_names[:3]:  # Test first 3 categories
+            app = self._submit(name=unique_name(f"Cat-{cat}"), category=cat)
+            fetched = self.ad.get_app(app["id"])
+            self.assertEqual(fetched.get("category", ""), cat)
+
+    def test_multiple_reviews_same_app(self):
+        app = self._submit()
+        self.ad.submit_review(app["id"], 5, title="Great")
+        self.ad.submit_review(app["id"], 3, title="OK")
+        reviews = self.ad.list_reviews(app["id"])
+        self.assertGreaterEqual(len(reviews["reviews"]), 2)
+
+
+# ── Error Response Tests ──────────────────────────────────────────────
+
+
+class TestErrors(AppDirectoryTestCase):
+    """Tests for consistent error handling."""
+
+    def test_404_structure(self):
+        try:
+            self.ad.get_app("nonexistent-id-xyz")
+        except NotFoundError as e:
+            self.assertEqual(e.status_code, 404)
+            self.assertIsNotNone(e.body)
+
+    def test_get_nonexistent_raises_404(self):
+        with self.assertRaises(NotFoundError):
+            self.ad.get_app("completely-nonexistent-id-12345")
+
+    def test_find_by_name_returns_none_for_missing(self):
+        result = self.ad.find_by_name(f"nonexistent-{unique_name()}")
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     print(f"\n📱 App Directory Python SDK Tests")
     print(f"   Server: {BASE_URL}\n")
