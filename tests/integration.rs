@@ -3235,3 +3235,628 @@ fn test_review_nonexistent_app_anonymous() {
         .dispatch();
     assert_eq!(resp.status(), Status::NotFound);
 }
+
+// ── Approval state machine edge cases ──
+
+#[test]
+fn test_approve_rejected_app() {
+    let (client, key) = setup_client();
+
+    // Submit app
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Reject Then Approve","short_description":"Test","description":"State machine test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Reject first
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reject", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"Not ready yet"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Then approve — should work (rejected→approved is valid)
+    let resp = client
+        .post(format!("/api/v1/apps/{}/approve", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Verify status is now approved
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["status"], "approved");
+}
+
+#[test]
+fn test_deprecate_requires_reason() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Deprecate Test","short_description":"Test","description":"Needs reason","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Approve first
+    client
+        .post(format!("/api/v1/apps/{}/approve", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{}"#)
+        .dispatch();
+
+    // Try deprecate with empty reason — should fail
+    let resp = client
+        .post(format!("/api/v1/apps/{}/deprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":""}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::BadRequest);
+}
+
+#[test]
+fn test_deprecate_then_approve_blocked() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Dep Then Approve","short_description":"Test","description":"Blocked test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Approve first
+    client
+        .post(format!("/api/v1/apps/{}/approve", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{}"#)
+        .dispatch();
+
+    // Deprecate
+    client
+        .post(format!("/api/v1/apps/{}/deprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"Replaced by v2"}"#)
+        .dispatch();
+
+    // Try approve deprecated — should fail
+    let resp = client
+        .post(format!("/api/v1/apps/{}/approve", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Conflict);
+}
+
+// ── Search edge cases ──
+
+#[test]
+fn test_search_empty_query() {
+    let (client, _) = setup_client();
+    let resp = client.get("/api/v1/apps/search?q=").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    // Empty query should return empty results (no crash)
+    assert!(body["apps"].is_array());
+}
+
+#[test]
+fn test_search_special_characters() {
+    let (client, key) = setup_client();
+
+    // Submit app with special chars in name
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"C++ Parser & Linter (v2.0)","short_description":"Parses C++","description":"A C++ parser","author_name":"Test"}"#)
+        .dispatch();
+
+    // Search with special chars — should not crash
+    let resp = client.get("/api/v1/apps/search?q=C%2B%2B").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+// ── Categories with counts ──
+
+#[test]
+fn test_categories_reflect_app_counts() {
+    let (client, key) = setup_client();
+
+    // Submit 2 apps in developer-tools
+    for i in 0..2 {
+        client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"name":"DevTool {}","short_description":"A tool","description":"Development tool","category":"developer-tools","author_name":"Test"}}"#, i))
+            .dispatch();
+    }
+
+    // Submit 1 app in monitoring
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Monitor App","short_description":"Monitoring","description":"A monitor","category":"monitoring","author_name":"Test"}"#)
+        .dispatch();
+
+    let resp = client.get("/api/v1/categories").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let cats = body["categories"].as_array().unwrap();
+
+    // Find developer-tools count
+    let dev = cats.iter().find(|c| c["slug"] == "developer-tools");
+    if let Some(d) = dev {
+        assert!(d["count"].as_i64().unwrap() >= 2, "developer-tools should have at least 2 apps");
+    }
+}
+
+// ── Key management edge cases ──
+
+#[test]
+fn test_revoke_key_then_use() {
+    let (client, admin_key, _db_path) = setup_client_with_path();
+
+    // Create a new key
+    let resp = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"ephemeral","admin":false}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let new_key = body["api_key"].as_str().unwrap().to_string();
+    assert!(body["message"].is_string());
+
+    // List keys to find the ID
+    let resp = client
+        .get("/api/v1/keys")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    let keys_body: Value = resp.into_json().unwrap();
+    let keys = keys_body["keys"].as_array().unwrap();
+    let ephemeral_key = keys.iter().find(|k| k["name"] == "ephemeral").unwrap();
+    let key_id = ephemeral_key["id"].as_str().unwrap();
+
+    // Revoke the key
+    let resp = client
+        .delete(format!("/api/v1/keys/{}", key_id))
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Revoked key should now fail on admin endpoints
+    let resp = client
+        .get("/api/v1/keys")
+        .header(Header::new("X-API-Key", new_key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Unauthorized);
+}
+
+// ── App creation validation ──
+
+#[test]
+fn test_submit_app_invalid_category() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Bad Category App","short_description":"Test","description":"Test app","category":"not-a-real-category","author_name":"Test"}"#)
+        .dispatch();
+    // Should either reject or accept with the provided category
+    // The API may be permissive — just verify no crash
+    assert!(resp.status() == Status::Created || resp.status() == Status::BadRequest);
+}
+
+#[test]
+fn test_submit_app_with_all_fields() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{
+            "name": "Full Feature App",
+            "short_description": "Complete submission",
+            "description": "An app with every field populated",
+            "api_url": "https://api.example.com/v1",
+            "homepage_url": "https://example.com",
+            "api_spec_url": "https://docs.example.com/openapi.json",
+            "protocol": "rest",
+            "category": "developer-tools",
+            "tags": ["test", "full", "complete"],
+            "author_name": "Test Author"
+        }"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+
+    // Verify all fields came back
+    let id = body["app_id"].as_str().unwrap();
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+
+    assert_eq!(app["name"], "Full Feature App");
+    assert_eq!(app["api_url"], "https://api.example.com/v1");
+    assert_eq!(app["homepage_url"], "https://example.com");
+    assert_eq!(app["protocol"], "rest");
+    assert_eq!(app["category"], "developer-tools");
+    assert!(app["tags"].as_array().unwrap().len() >= 3);
+    assert_eq!(app["author_name"], "Test Author");
+}
+
+// ── Review rating validation ──
+
+#[test]
+fn test_review_invalid_rating_too_high() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Rating Test App","short_description":"Test","description":"For rating validation","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Rating > 5 should be rejected
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":6}"#)
+        .dispatch();
+    assert!(resp.status() == Status::BadRequest || resp.status() == Status::UnprocessableEntity,
+        "Rating 6 should be rejected, got {:?}", resp.status());
+}
+
+#[test]
+fn test_review_invalid_rating_zero() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Zero Rating App","short_description":"Test","description":"For rating validation","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Rating 0 should be rejected (valid range is 1-5)
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":0}"#)
+        .dispatch();
+    assert!(resp.status() == Status::BadRequest || resp.status() == Status::UnprocessableEntity,
+        "Rating 0 should be rejected, got {:?}", resp.status());
+}
+
+// ── Review aggregate statistics ──
+
+#[test]
+fn test_review_average_rating() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Avg Rating App","short_description":"Test","description":"For avg rating","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Submit 3 anonymous reviews with different ratings
+    for rating in [3, 4, 5] {
+        client
+            .post(format!("/api/v1/apps/{}/reviews", id))
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"rating":{}}}"#, rating))
+            .dispatch();
+    }
+
+    // Check app's aggregate rating
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+
+    assert_eq!(app["review_count"], 3);
+    let avg = app["avg_rating"].as_f64().unwrap();
+    assert!((avg - 4.0).abs() < 0.01, "Average should be ~4.0, got {}", avg);
+}
+
+// ── Slug uniqueness ──
+
+#[test]
+fn test_slug_uniqueness_collision() {
+    let (client, key) = setup_client();
+
+    // Submit two apps with the same name — slugs should be unique
+    let resp1 = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Duplicate Name","short_description":"First","description":"First app with this name","author_name":"Test"}"#)
+        .dispatch();
+    assert_eq!(resp1.status(), Status::Created);
+    let body1: Value = resp1.into_json().unwrap();
+    let slug1 = body1["slug"].as_str().unwrap().to_string();
+
+    let resp2 = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Duplicate Name","short_description":"Second","description":"Second app with same name","author_name":"Test"}"#)
+        .dispatch();
+    assert_eq!(resp2.status(), Status::Created);
+    let body2: Value = resp2.into_json().unwrap();
+    let slug2 = body2["slug"].as_str().unwrap().to_string();
+
+    // Slugs should be different (one should have a suffix)
+    assert_ne!(slug1, slug2, "Duplicate names should get different slugs");
+
+    // Both should be accessible by slug
+    let resp = client.get(format!("/api/v1/apps/{}", slug1)).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let resp = client.get(format!("/api/v1/apps/{}", slug2)).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+}
+
+// ── App update edge cases ──
+
+#[test]
+fn test_update_app_name_preserves_slug() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Original Name","short_description":"Test","description":"Slug stability test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+    let original_slug = body["slug"].as_str().unwrap().to_string();
+
+    // Update the name
+    let resp = client
+        .patch(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Updated Name"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Slug should be STABLE (not change when name changes) — for URL reliability
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["name"], "Updated Name");
+    assert_eq!(app["slug"], original_slug, "Slug should remain stable after name change");
+}
+
+// ── Health check response structure ──
+
+#[test]
+fn test_health_response_structure() {
+    let (client, _) = setup_client();
+    let resp = client.get("/api/v1/health").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["service"], "app-directory");
+    assert!(body["version"].is_string());
+}
+
+// ── List apps combined filters ──
+
+#[test]
+fn test_list_apps_combined_filters() {
+    let (client, key) = setup_client();
+
+    // Submit a featured app in developer-tools
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Featured DevTool","short_description":"A featured tool","description":"Featured developer tool","category":"developer-tools","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Set as featured
+    client
+        .patch(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"featured":true}"#)
+        .dispatch();
+
+    // Filter: featured + category
+    let resp = client.get("/api/v1/apps?featured=true&category=developer-tools").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    // All returned apps should be featured AND in developer-tools
+    for app in apps {
+        assert_eq!(app["featured"], true);
+        assert_eq!(app["category"], "developer-tools");
+    }
+}
+
+// ── Webhook event filtering ──
+
+#[test]
+fn test_webhook_with_event_filter() {
+    let (client, key) = setup_client();
+
+    // Create webhook with only specific events
+    let resp = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url":"https://hook.example.com/events","events":["app.submitted","app.approved"]}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert!(events.contains(&serde_json::json!("app.submitted")));
+    assert!(events.contains(&serde_json::json!("app.approved")));
+}
+
+// ── Undeprecate restores to approved ──
+
+#[test]
+fn test_undeprecate_restores_status() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Undeprecate Test","short_description":"Test","description":"Undeprecation test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Approve, then deprecate
+    client
+        .post(format!("/api/v1/apps/{}/approve", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{}"#)
+        .dispatch();
+
+    client
+        .post(format!("/api/v1/apps/{}/deprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"Testing deprecation"}"#)
+        .dispatch();
+
+    // Verify deprecated
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["status"], "deprecated");
+    assert!(app["deprecated_reason"].is_string());
+
+    // Undeprecate
+    let resp = client
+        .post(format!("/api/v1/apps/{}/undeprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Verify status restored and deprecation fields cleared
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["status"], "approved");
+    assert!(app["deprecated_reason"].is_null() || app["deprecated_reason"].as_str().unwrap_or("").is_empty());
+}
+
+// ── Delete cascade verification ──
+
+#[test]
+fn test_delete_app_cascades_webhooks_events() {
+    let (client, key) = setup_client();
+
+    // Submit app
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Cascade Webhook Test","short_description":"Test","description":"For cascade test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Add reviews
+    client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5,"title":"Great"}"#)
+        .dispatch();
+
+    // Delete app
+    let resp = client
+        .delete(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // App should be gone
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+
+    // Reviews endpoint for deleted app should return 404 or empty
+    let resp = client.get(format!("/api/v1/apps/{}/reviews", id)).dispatch();
+    if resp.status() == Status::Ok {
+        // If 200, reviews should be empty
+        let body: Value = resp.into_json().unwrap();
+        assert_eq!(body["total"], 0);
+    } else {
+        assert_eq!(resp.status(), Status::NotFound);
+    }
+}
+
+// ── Pagination edge cases ──
+
+#[test]
+fn test_list_apps_page_beyond_data() {
+    let (client, _) = setup_client();
+
+    // Request page 999 with no data
+    let resp = client.get("/api/v1/apps?page=999&per_page=10").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["apps"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_list_apps_per_page_boundary() {
+    let (client, key) = setup_client();
+
+    // Submit 3 apps
+    for i in 0..3 {
+        client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"name":"Paginate App {}","short_description":"Test","description":"Pagination test","author_name":"Test"}}"#, i))
+            .dispatch();
+    }
+
+    // per_page=2: page 1 should have 2, page 2 should have 1
+    let resp = client.get("/api/v1/apps?per_page=2&page=1").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["apps"].as_array().unwrap().len(), 2);
+
+    let resp = client.get("/api/v1/apps?per_page=2&page=2").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["apps"].as_array().unwrap().len(), 1);
+}
