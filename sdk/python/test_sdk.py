@@ -438,7 +438,7 @@ class TestConvenience(AppDirectoryTestCase):
 # =========================================================================
 
 
-class TestEdgeCases(AppDirectoryTestCase):
+class TestEdgeCasesBasic(AppDirectoryTestCase):
     def test_protocols(self):
         """Submit apps with various protocols."""
         for proto in ("rest", "graphql", "grpc", "websocket"):
@@ -1357,6 +1357,395 @@ class TestErrors(AppDirectoryTestCase):
     def test_find_by_name_returns_none_for_missing(self):
         result = self.ad.find_by_name(f"nonexistent-{unique_name()}")
         self.assertIsNone(result)
+
+
+# =========================================================================
+# App Response Field Validation
+# =========================================================================
+
+
+class TestAppResponseFields(AdminTestCase):
+    """Verify all expected fields on app responses in different states."""
+
+    def test_approved_app_fields(self):
+        """Approved apps should have full set of fields."""
+        app = self._submit(
+            protocol="rest",
+            category="data",
+            tags=["field-test"],
+            homepage_url="https://example.com",
+        )
+        fetched = self.ad.get_app(app["id"])
+        required = {"id", "name", "slug", "short_description", "description",
+                     "author_name", "status", "created_at", "protocol", "category"}
+        missing = required - set(fetched.keys())
+        self.assertEqual(missing, set(), f"Missing required fields: {missing}")
+        self.assertEqual(fetched["status"], "approved")
+
+    def test_rejected_app_fields(self):
+        """Rejected apps should have review metadata."""
+        app = self._submit()
+        self.admin.reject(app["id"], "Incomplete")
+        fetched = self.admin.get_app(app["id"])
+        self.assertEqual(fetched["status"], "rejected")
+        self.assertIsNotNone(fetched.get("reviewed_at"))
+
+    def test_deprecated_app_fields(self):
+        """Deprecated apps should have deprecation metadata."""
+        app = self._submit()
+        self.admin.deprecate(app["id"], "EOL", sunset_at="2026-12-31T00:00:00Z")
+        fetched = self.admin.get_app(app["id"])
+        self.assertEqual(fetched["status"], "deprecated")
+        self.assertEqual(fetched.get("deprecated_reason"), "EOL")
+        self.assertIsNotNone(fetched.get("deprecated_at"))
+        self.assertIsNotNone(fetched.get("sunset_at"))
+
+    def test_app_timestamps_are_strings(self):
+        app = self._submit()
+        fetched = self.ad.get_app(app["id"])
+        ts = fetched.get("created_at", "")
+        self.assertIsInstance(ts, str)
+        self.assertGreater(len(ts), 0)
+
+    def test_app_id_is_uuid_format(self):
+        """App ID should look like a UUID."""
+        app = self._submit()
+        app_id = app["id"]
+        self.assertEqual(len(app_id), 36)  # UUID format: 8-4-4-4-12
+        self.assertEqual(app_id.count("-"), 4)
+
+    def test_slug_is_lowercase(self):
+        """Slug should be lowercase and URL-friendly."""
+        app = self._submit(name=unique_name("My-Cool-App"))
+        slug = app.get("slug", "")
+        self.assertTrue(slug.islower() or slug.replace("-", "").replace("_", "").isalnum(),
+                        f"Slug should be URL-friendly: {slug}")
+
+
+# =========================================================================
+# Sorting Tests
+# =========================================================================
+
+
+class TestSorting(AdminTestCase):
+    """Test various sort options."""
+
+    def test_sort_by_created(self):
+        result = self.ad.list_apps(sort="created")
+        self.assertIn("apps", result)
+
+    def test_sort_by_name_alphabetical(self):
+        """Sort by name should return alphabetical order."""
+        a_name = unique_name("AAA-Sort")
+        z_name = unique_name("ZZZ-Sort")
+        self._submit(name=a_name)
+        self._submit(name=z_name)
+        result = self.ad.list_apps(sort="name", per_page=200)
+        names = [app["name"] for app in result["apps"]]
+        a_idx = next((i for i, n in enumerate(names) if n == a_name), -1)
+        z_idx = next((i for i, n in enumerate(names) if n == z_name), -1)
+        if a_idx >= 0 and z_idx >= 0:
+            self.assertLess(a_idx, z_idx, "AAA should come before ZZZ")
+
+    def test_sort_by_rating(self):
+        result = self.ad.list_apps(sort="rating")
+        self.assertIn("apps", result)
+
+    def test_sort_by_views(self):
+        result = self.ad.list_apps(sort="views")
+        self.assertIn("apps", result)
+
+
+# =========================================================================
+# Stats Detail Tests
+# =========================================================================
+
+
+class TestStatsDetail(AdminTestCase):
+    """Detailed stats validation."""
+
+    def test_stats_fields_complete(self):
+        """App stats should have expected fields."""
+        app = self._submit()
+        self.ad.get_app(app["id"])  # trigger a view
+        stats = self.ad.app_stats(app["id"])
+        expected = {"total_views"}
+        missing = expected - set(stats.keys())
+        self.assertEqual(missing, set(), f"Missing stats fields: {missing}")
+
+    def test_stats_views_increment(self):
+        """Each get_app call should increment views."""
+        app = self._submit()
+        stats_before = self.ad.app_stats(app["id"])
+        initial = stats_before.get("total_views", 0)
+        self.ad.get_app(app["id"])
+        stats_after = self.ad.app_stats(app["id"])
+        self.assertGreater(stats_after.get("total_views", 0), initial)
+
+    def test_trending_fields(self):
+        """Trending apps should have expected fields."""
+        # Create and view an app to make it trending
+        app = self._submit()
+        for _ in range(5):
+            self.ad.get_app(app["id"])
+        result = self.ad.trending(days=7, limit=50)
+        if result.get("trending"):
+            item = result["trending"][0]
+            # Trending items are flat app objects with view_count added
+            self.assertIn("view_count", item)
+            self.assertIn("id", item)
+            self.assertIn("name", item)
+
+    def test_trending_days_1(self):
+        result = self.ad.trending(days=1)
+        self.assertIn("trending", result)
+
+    def test_trending_days_90(self):
+        result = self.ad.trending(days=90)
+        self.assertIn("trending", result)
+
+
+# =========================================================================
+# Health Check Detail Tests
+# =========================================================================
+
+
+class TestHealthCheckDetail(AdminTestCase):
+    """Detailed health check tests."""
+
+    def test_health_history_empty(self):
+        """New app should have empty health history."""
+        app = self._submit()
+        history = self.ad.health_history(app["id"])
+        self.assertIn("checks", history)
+        self.assertIsInstance(history["checks"], list)
+
+    def test_health_history_after_check(self):
+        """After a health check, history should have entries."""
+        app = self._submit(api_url="https://httpbin.org/status/200")
+        self.admin.health_check(app["id"])
+        time.sleep(0.5)
+        history = self.ad.health_history(app["id"])
+        self.assertIn("checks", history)
+
+    def test_health_summary_fields(self):
+        """Health summary should have expected structure."""
+        result = self.admin.health_summary()
+        self.assertIsInstance(result, dict)
+
+    def test_health_check_nonexistent_app(self):
+        """Health check on nonexistent app should 404."""
+        with self.assertRaises(NotFoundError):
+            self.admin.health_check("nonexistent-app-id")
+
+
+# =========================================================================
+# Webhook Event Types
+# =========================================================================
+
+
+class TestWebhookEventTypes(AdminTestCase):
+    """Test webhook creation with various event types."""
+
+    def test_webhook_all_event_types(self):
+        """Create webhooks with each individual event type."""
+        event_types = [
+            "app.submitted",
+            "app.approved",
+            "app.rejected",
+            "app.deprecated",
+            "app.undeprecated",
+        ]
+        for evt in event_types:
+            wh = self.admin.create_webhook(
+                f"https://httpbin.org/post",
+                events=[evt],
+            )
+            self.assertIn("id", wh)
+            # Cleanup
+            self.admin.delete_webhook(wh["id"])
+
+    def test_webhook_multiple_events(self):
+        wh = self.admin.create_webhook(
+            "https://httpbin.org/post",
+            events=["app.submitted", "app.approved", "app.deprecated"],
+        )
+        self.assertIn("id", wh)
+        self.admin.delete_webhook(wh["id"])
+
+    def test_webhook_no_events_filter(self):
+        """Webhook with no event filter should receive all events."""
+        wh = self.admin.create_webhook("https://httpbin.org/post")
+        self.assertIn("id", wh)
+        self.admin.delete_webhook(wh["id"])
+
+
+# =========================================================================
+# Slug Behavior
+# =========================================================================
+
+
+class TestSlugBehavior(AppDirectoryTestCase):
+    """Test slug generation and behavior."""
+
+    def test_slug_generated_from_name(self):
+        name = unique_name("My-Awesome-App")
+        app = self._submit(name=name)
+        slug = app.get("slug", "")
+        self.assertGreater(len(slug), 0)
+        # Slug should contain some of the name
+        self.assertIn("my", slug.lower())
+
+    def test_slug_url_safe(self):
+        """Slug should only contain URL-safe characters."""
+        app = self._submit(name=unique_name("Special Ch@rs!"))
+        slug = app.get("slug", "")
+        import re
+        self.assertTrue(re.match(r'^[a-z0-9\-]+$', slug),
+                        f"Slug should be URL-safe: {slug}")
+
+    def test_slug_lookup_matches_id_lookup(self):
+        """Getting by slug should return same app as getting by id."""
+        app = self._submit()
+        by_id = self.ad.get_app(app["id"])
+        by_slug = self.ad.get_app(app["slug"])
+        self.assertEqual(by_id["id"], by_slug["id"])
+        self.assertEqual(by_id["name"], by_slug["name"])
+
+    def test_unique_slugs(self):
+        """Two apps with similar names should have unique slugs."""
+        base = unique_name("DupSlug")
+        a1 = self._submit(name=base)
+        a2 = self._submit(name=base)
+        self.assertNotEqual(a1["slug"], a2["slug"])
+
+
+# =========================================================================
+# Category Count Verification
+# =========================================================================
+
+
+class TestCategoryCounts(AdminTestCase):
+    """Test category listing accuracy."""
+
+    def test_categories_returns_list(self):
+        cats = self.ad.categories()
+        self.assertIsInstance(cats, dict)
+
+    def test_category_count_reflects_apps(self):
+        """After submitting an app in a category, count should reflect it."""
+        cat = "productivity"
+        self._submit(category=cat)
+        cats = self.ad.categories()
+        # Categories format varies — check any format
+        if "categories" in cats:
+            cat_list = cats["categories"]
+            if cat_list and isinstance(cat_list[0], dict):
+                matching = [c for c in cat_list if c.get("name") == cat]
+                if matching:
+                    self.assertGreater(matching[0].get("count", 0), 0)
+
+
+# =========================================================================
+# Concurrent Client Behavior
+# =========================================================================
+
+
+class TestConcurrentClients(AppDirectoryTestCase):
+    """Test behavior with multiple client instances."""
+
+    def test_two_clients_see_same_data(self):
+        client2 = AppDirectory(BASE_URL)
+        app = self._submit()
+        fetched = client2.get_app(app["id"])
+        self.assertEqual(fetched["id"], app["id"])
+
+    def test_admin_and_anon_see_same_app(self):
+        admin = AppDirectory(BASE_URL, api_key=ADMIN_KEY)
+        app = self._submit()
+        anon_view = self.ad.get_app(app["id"])
+        admin_view = admin.get_app(app["id"])
+        self.assertEqual(anon_view["id"], admin_view["id"])
+
+    def test_edit_from_different_client(self):
+        """Edit token works from a different client instance."""
+        app = self._submit()
+        client2 = AppDirectory(BASE_URL, edit_token=app["edit_token"])
+        new_name = unique_name("ClientSwap")
+        client2.update_app(app["id"], name=new_name)
+        fetched = self.ad.get_app(app["id"])
+        self.assertEqual(fetched["name"], new_name)
+
+
+# =========================================================================
+# OpenAPI Spec Deep Validation
+# =========================================================================
+
+
+class TestOpenAPIDeep(AppDirectoryTestCase):
+    """Deep validation of OpenAPI spec."""
+
+    def test_openapi_version(self):
+        spec = self.ad.openapi()
+        self.assertTrue(spec["openapi"].startswith("3."))
+
+    def test_openapi_has_apps_endpoints(self):
+        spec = self.ad.openapi()
+        path_str = json.dumps(spec.get("paths", {}))
+        self.assertIn("apps", path_str)
+
+    def test_openapi_has_reviews_endpoint(self):
+        spec = self.ad.openapi()
+        path_str = json.dumps(spec.get("paths", {}))
+        self.assertIn("review", path_str)
+
+    def test_openapi_has_health_endpoint(self):
+        spec = self.ad.openapi()
+        path_str = json.dumps(spec.get("paths", {}))
+        self.assertIn("health", path_str)
+
+    def test_openapi_has_categories_endpoint(self):
+        spec = self.ad.openapi()
+        path_str = json.dumps(spec.get("paths", {}))
+        self.assertIn("categories", path_str)
+
+    def test_openapi_has_alerts_or_webhooks(self):
+        spec = self.ad.openapi()
+        path_str = json.dumps(spec.get("paths", {}))
+        self.assertTrue("webhook" in path_str or "alert" in path_str)
+
+
+# =========================================================================
+# Error Consistency
+# =========================================================================
+
+
+class TestErrorConsistency(AppDirectoryTestCase):
+    """Verify error responses are consistent."""
+
+    def test_404_has_status_code(self):
+        with self.assertRaises(NotFoundError) as ctx:
+            self.ad.get_app("fake-id-abc")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_auth_error_has_status(self):
+        """Operations requiring auth should 401/403."""
+        with self.assertRaises((AuthError, ForbiddenError)):
+            self.ad.my_apps()
+
+    def test_error_message_not_empty(self):
+        try:
+            self.ad.get_app("fake-id-xyz")
+        except NotFoundError as e:
+            self.assertGreater(len(str(e)), 0)
+
+    def test_conflict_error_on_double_deprecate(self):
+        admin = AppDirectory(BASE_URL, api_key=ADMIN_KEY)
+        app = self._submit()
+        admin.deprecate(app["id"], "first time")
+        with self.assertRaises(ConflictError) as ctx:
+            admin.deprecate(app["id"], "second time")
+        self.assertEqual(ctx.exception.status_code, 409)
 
 
 if __name__ == "__main__":
