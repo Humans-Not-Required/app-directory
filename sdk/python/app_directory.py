@@ -237,6 +237,9 @@ class AppDirectory:
         category: Optional[str] = None,
         protocol: Optional[str] = None,
         status: Optional[str] = None,
+        featured: Optional[bool] = None,
+        verified: Optional[bool] = None,
+        health: Optional[str] = None,
         sort: Optional[str] = None,
         page: Optional[int] = None,
         per_page: Optional[int] = None,
@@ -247,6 +250,9 @@ class AppDirectory:
             category: Filter by category (e.g. ``"data"``, ``"infrastructure"``).
             protocol: Filter by protocol (e.g. ``"rest"``, ``"grpc"``).
             status: Filter by status (``"pending"``, ``"approved"``, ``"rejected"``, ``"deprecated"``, ``"all"``).
+            featured: Filter by featured badge.
+            verified: Filter by verified badge.
+            health: Filter by health status.
             sort: Sort order (``"name"``, ``"newest"``, ``"oldest"``, ``"rating"``).
             page: Page number (1-based).
             per_page: Results per page (default 20, max 100).
@@ -254,14 +260,21 @@ class AppDirectory:
         Returns:
             Dict with ``apps`` list, ``total``, ``page``, ``per_page``.
         """
-        return self._request("GET", "/api/v1/apps", query={
+        query: Dict[str, Any] = {
             "category": category,
             "protocol": protocol,
             "status": status,
             "sort": sort,
             "page": page,
             "per_page": per_page,
-        })
+        }
+        if featured is not None:
+            query["featured"] = str(featured).lower()
+        if verified is not None:
+            query["verified"] = str(verified).lower()
+        if health is not None:
+            query["health"] = health
+        return self._request("GET", "/api/v1/apps", query=query)
 
     def get_app(self, id_or_slug: str) -> Dict[str, Any]:
         """``GET /api/v1/apps/{id_or_slug}`` — get app by ID or slug.
@@ -595,7 +608,7 @@ class AppDirectory:
         Args:
             app_id: App UUID.
         """
-        return self._request("POST", f"/api/v1/apps/{app_id}/health-check", json_body={})
+        return self._request("POST", f"/api/v1/apps/{app_id}/health-check", json_body={}, auth=True)
 
     def health_check_batch(self, app_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """``POST /api/v1/apps/health-check/batch`` — batch health check.
@@ -606,7 +619,7 @@ class AppDirectory:
         body: Dict[str, Any] = {}
         if app_ids is not None:
             body["app_ids"] = app_ids
-        return self._request("POST", "/api/v1/apps/health-check/batch", json_body=body)
+        return self._request("POST", "/api/v1/apps/health-check/batch", json_body=body, auth=True)
 
     def health_history(
         self,
@@ -632,8 +645,8 @@ class AppDirectory:
         return self._request("GET", "/api/v1/apps/health/summary")
 
     def health_schedule(self) -> Dict[str, Any]:
-        """``GET /api/v1/health-check/schedule`` — health check scheduler info."""
-        return self._request("GET", "/api/v1/health-check/schedule")
+        """``GET /api/v1/health-check/schedule`` — health check scheduler info (admin)."""
+        return self._request("GET", "/api/v1/health-check/schedule", auth=True)
 
     # ------------------------------------------------------------------
     # Webhooks
