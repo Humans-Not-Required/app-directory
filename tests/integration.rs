@@ -3860,3 +3860,1650 @@ fn test_list_apps_per_page_boundary() {
     let body: Value = resp.into_json().unwrap();
     assert_eq!(body["apps"].as_array().unwrap().len(), 1);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// New integration tests: Stats, Health, Lifecycle, Edge Cases
+// ═══════════════════════════════════════════════════════════════
+
+// ── Stats: view count increments on each GET ──
+
+#[test]
+fn test_stats_view_count_increments() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Stats Counter","short_description":"Test","description":"Test stats","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Check stats initially (0 views since submit doesn't count)
+    let resp = client.get(format!("/api/v1/apps/{}/stats", id)).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let stats: Value = resp.into_json().unwrap();
+    let initial = stats["total_views"].as_i64().unwrap();
+
+    // GET the app 3 times to generate views
+    for _ in 0..3 {
+        client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    }
+
+    let resp = client.get(format!("/api/v1/apps/{}/stats", id)).dispatch();
+    let stats: Value = resp.into_json().unwrap();
+    // Should have at least 3 more views (stats endpoint itself may or may not count)
+    assert!(stats["total_views"].as_i64().unwrap() >= initial + 3);
+}
+
+// ── Stats: via slug lookup ──
+
+#[test]
+fn test_stats_via_slug() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Slug Stats App","short_description":"Test","description":"Test stats via slug","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let slug = body["slug"].as_str().unwrap();
+
+    // Stats by slug should work
+    let resp = client.get(format!("/api/v1/apps/{}/stats", slug)).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let stats: Value = resp.into_json().unwrap();
+    assert!(stats["app_id"].is_string());
+    assert!(stats["total_views"].is_number());
+    assert!(stats["views_24h"].is_number());
+    assert!(stats["views_7d"].is_number());
+    assert!(stats["views_30d"].is_number());
+    assert!(stats["unique_viewers"].is_number());
+}
+
+// ── Stats: nonexistent app returns 404 ──
+
+#[test]
+fn test_stats_nonexistent_app() {
+    let (client, _) = setup_client();
+
+    let resp = client
+        .get("/api/v1/apps/00000000-0000-0000-0000-000000000000/stats")
+        .dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+}
+
+// ── Trending: empty result when no views ──
+
+#[test]
+fn test_trending_empty() {
+    let (client, key) = setup_client();
+
+    // Submit app but don't view it
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"No Views App","short_description":"Test","description":"No views","author_name":"Test"}"#)
+        .dispatch();
+
+    let resp = client.get("/api/v1/apps/trending").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["trending"].as_array().unwrap().is_empty());
+    assert_eq!(body["period_days"], 7);
+}
+
+// ── Trending: custom days and limit parameters ──
+
+#[test]
+fn test_trending_custom_params() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Trending Test","short_description":"Test","description":"Test trending","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Generate views
+    for _ in 0..3 {
+        client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    }
+
+    // Custom days=1, limit=5
+    let resp = client.get("/api/v1/apps/trending?days=1&limit=5").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["period_days"], 1);
+    let trending = body["trending"].as_array().unwrap();
+    assert!(trending.len() <= 5);
+    if !trending.is_empty() {
+        assert!(trending[0]["view_count"].as_i64().unwrap() > 0);
+        assert!(trending[0]["views_per_day"].as_f64().unwrap() > 0.0);
+        assert!(trending[0]["unique_viewers"].is_number());
+    }
+
+    // days clamped to 90 max
+    let resp = client.get("/api/v1/apps/trending?days=200").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["period_days"], 90);
+}
+
+// ── Trending: response structure fields ──
+
+#[test]
+fn test_trending_response_fields() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Trending Fields","short_description":"Test","description":"Test trending fields","author_name":"Test","protocol":"mcp","category":"ai-ml","tags":["test"]}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Generate views
+    client.get(format!("/api/v1/apps/{}", id)).dispatch();
+
+    let resp = client.get("/api/v1/apps/trending?days=7&limit=1").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let trending = body["trending"].as_array().unwrap();
+    if !trending.is_empty() {
+        let app = &trending[0];
+        assert!(app["id"].is_string());
+        assert!(app["name"].is_string());
+        assert!(app["slug"].is_string());
+        assert!(app["short_description"].is_string());
+        assert!(app["protocol"].is_string());
+        assert!(app["category"].is_string());
+        assert!(app["tags"].is_array());
+        assert!(app["view_count"].is_number());
+        assert!(app["unique_viewers"].is_number());
+        assert!(app["views_per_day"].is_number());
+    }
+}
+
+// ── Health history: pagination ──
+
+#[test]
+fn test_health_history_pagination() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Health Paginate","short_description":"Test","description":"Test health history pagination","author_name":"Test","api_url":"https://httpbin.org/status/200"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Check health history with pagination params (no auth needed)
+    let resp = client
+        .get(format!("/api/v1/apps/{}/health?page=1&per_page=5", id))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["checks"].is_array());
+    // uptime_pct is null when no checks have been performed yet
+    assert!(body["uptime_pct"].is_number() || body["uptime_pct"].is_null());
+}
+
+// ── Health check: non-admin rejected ──
+
+#[test]
+fn test_health_check_non_admin_rejected() {
+    let (client, key, path) = setup_client_with_path();
+
+    // Create a non-admin key
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let user_key = app_directory::auth::create_api_key(&conn, "user", false, Some(10000));
+    drop(conn);
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Health Reject Test","short_description":"Test","description":"Test non-admin health check","author_name":"Test","api_url":"https://httpbin.org/status/200"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Non-admin trigger health check → 403
+    let resp = client
+        .post(format!("/api/v1/apps/{}/health-check", id))
+        .header(Header::new("X-API-Key", user_key))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Forbidden);
+}
+
+// ── Health summary: structure ──
+
+#[test]
+fn test_health_summary_structure() {
+    let (client, key) = setup_client();
+
+    // Submit an app so summary has data to report
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Summary App","short_description":"Test","description":"Health summary test","author_name":"Test"}"#)
+        .dispatch();
+
+    let resp = client
+        .get("/api/v1/apps/health/summary")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["total_approved_apps"].is_number());
+    assert!(body["monitored"].is_number());
+    assert!(body["healthy"].is_number());
+    assert!(body["unhealthy"].is_number());
+    assert!(body["unreachable"].is_number());
+    assert!(body["issues"].is_array());
+}
+
+// ── Schedule endpoint response ──
+
+#[test]
+fn test_schedule_endpoint_structure() {
+    let (client, key) = setup_client();
+
+    // Admin key required
+    let resp = client
+        .get("/api/v1/health-check/schedule")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["interval_seconds"].is_number());
+    assert!(body["enabled"].is_boolean());
+    assert!(body["description"].is_string());
+    assert!(body["config_var"].is_string());
+}
+
+// ── Schedule endpoint: requires admin ──
+
+#[test]
+fn test_schedule_endpoint_requires_admin() {
+    let (client, _, path) = setup_client_with_path();
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let user_key = app_directory::auth::create_api_key(&conn, "user", false, Some(10000));
+    drop(conn);
+
+    let resp = client
+        .get("/api/v1/health-check/schedule")
+        .header(Header::new("X-API-Key", user_key))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Forbidden);
+}
+
+// ── Review: multiple keys on same app ──
+
+#[test]
+fn test_review_multiple_authenticated_keys() {
+    let (client, key, path) = setup_client_with_path();
+
+    // Submit app
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Multi Review App","short_description":"Test","description":"Multi reviewer test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Create a second key
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let key2 = app_directory::auth::create_api_key(&conn, "reviewer2", false, Some(10000));
+    drop(conn);
+
+    // Review with key 1
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5,"title":"Excellent","comment":"Great work"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Review with key 2
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(Header::new("X-API-Key", key2))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":3,"title":"Decent","comment":"OK but could be better"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Should have 2 reviews, avg 4.0
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["total"], 2);
+
+    // Check aggregate on app
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["review_count"], 2);
+    let avg = app["avg_rating"].as_f64().unwrap();
+    assert!((avg - 4.0).abs() < 0.01);
+}
+
+// ── Review: anonymous + authenticated on same app ──
+
+#[test]
+fn test_review_mixed_anonymous_and_authenticated() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Mixed Review App","short_description":"Test","description":"Mixed review test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Anonymous review (no auth)
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":4,"title":"Anonymous review","reviewer_name":"Anonymous Agent"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Authenticated review
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5,"title":"Admin review"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Second anonymous review (should create new entry)
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":2,"title":"Another anonymous"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    // At least 3 reviews (2 anonymous + 1 authenticated)
+    assert!(body["total"].as_i64().unwrap() >= 3);
+}
+
+// ── Review: reviewer_name field preserved ──
+
+#[test]
+fn test_review_reviewer_name_field() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Reviewer Name App","short_description":"Test","description":"Test reviewer name","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Submit anonymous review with reviewer_name
+    client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":4,"title":"Named review","reviewer_name":"CoolAgent42"}"#)
+        .dispatch();
+
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let reviews = body["reviews"].as_array().unwrap();
+    assert!(!reviews.is_empty());
+    // Find the review with our name
+    let found = reviews.iter().any(|r| r["reviewer_name"] == "CoolAgent42");
+    assert!(found, "reviewer_name should be preserved in review list");
+}
+
+// ── Full state machine lifecycle ──
+
+#[test]
+fn test_full_approval_state_machine() {
+    let (client, key) = setup_client();
+
+    // Admin submit → auto-approved
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"State Machine App","short_description":"Test","description":"Full lifecycle test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+    assert_eq!(body["status"], "approved");
+
+    // Reject it
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reject", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"Quality concerns"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Verify rejected via GET
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["status"], "rejected");
+
+    // Re-approve it
+    let resp = client
+        .post(format!("/api/v1/apps/{}/approve", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"note":"Issues resolved"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Verify review metadata on app via GET
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["status"], "approved");
+    assert!(app["reviewed_at"].is_string());
+}
+
+// ── Deprecation → rejection blocked ──
+
+#[test]
+fn test_deprecated_reject_blocked() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Deprecate Block Test","short_description":"Test","description":"Deprecation reject block","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Deprecate
+    client
+        .post(format!("/api/v1/apps/{}/deprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"Deprecated"}"#)
+        .dispatch();
+
+    // Reject should be blocked (deprecated apps can't be rejected)
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reject", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"Trying to reject deprecated"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Conflict);
+}
+
+// ── Deprecation: sunset_at field ──
+
+#[test]
+fn test_deprecation_with_sunset_date() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Sunset Test","short_description":"Test","description":"Test sunset","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Deprecate with sunset date
+    let resp = client
+        .post(format!("/api/v1/apps/{}/deprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"End of life","sunset_at":"2026-06-01T00:00:00Z"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Verify sunset_at preserved
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["status"], "deprecated");
+    assert!(app["sunset_at"].as_str().unwrap().contains("2026-06-01"));
+}
+
+// ── Full lifecycle: submit→approve→update→deprecate→undeprecate→delete ──
+
+#[test]
+fn test_full_lifecycle() {
+    let (client, key) = setup_client();
+
+    // Submit
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Lifecycle App","short_description":"Full lifecycle","description":"Testing all stages","author_name":"Test","protocol":"rest","category":"developer-tools","tags":["lifecycle"]}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap().to_string();
+    assert_eq!(body["status"], "approved");
+
+    // Add review
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5,"title":"Perfect","comment":"Works great"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // Generate views
+    client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    client.get(format!("/api/v1/apps/{}", id)).dispatch();
+
+    // Update
+    let resp = client
+        .patch(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"description":"Updated description for lifecycle test"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Deprecate
+    let resp = client
+        .post(format!("/api/v1/apps/{}/deprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"reason":"Replaced by v2"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Undeprecate
+    let resp = client
+        .post(format!("/api/v1/apps/{}/undeprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Check stats exist
+    let resp = client.get(format!("/api/v1/apps/{}/stats", id)).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let stats: Value = resp.into_json().unwrap();
+    assert!(stats["total_views"].as_i64().unwrap() >= 2);
+
+    // Delete
+    let resp = client
+        .delete(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Gone
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+
+    // Stats also 404
+    let resp = client.get(format!("/api/v1/apps/{}/stats", id)).dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+}
+
+// ── Edit token: full lifecycle ──
+
+#[test]
+fn test_edit_token_full_lifecycle() {
+    let (client, _) = setup_client();
+
+    // Anonymous submit (no API key) → gets edit token
+    let resp = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Token Lifecycle App","short_description":"Test","description":"Edit token lifecycle","author_name":"Test Agent"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap().to_string();
+    let token = body["edit_token"].as_str().unwrap().to_string();
+    assert!(!token.is_empty());
+
+    // Update via query param
+    let resp = client
+        .patch(format!("/api/v1/apps/{}?token={}", id, token))
+        .header(ContentType::JSON)
+        .body(r#"{"description":"Updated via query param token"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Update via header
+    let resp = client
+        .patch(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-Edit-Token", token.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"short_description":"Updated via header token"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Delete via header
+    let resp = client
+        .delete(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-Edit-Token", token.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Confirm deleted
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+}
+
+// ── Webhook: multiple webhooks for same events ──
+
+#[test]
+fn test_multiple_webhooks_same_events() {
+    let (client, key) = setup_client();
+
+    // Create two webhooks both listening to same event
+    let resp = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url":"https://hook1.example.com","events":["app.submitted"]}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let wh1: Value = resp.into_json().unwrap();
+
+    let resp = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url":"https://hook2.example.com","events":["app.submitted"]}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let wh2: Value = resp.into_json().unwrap();
+
+    // Both should have different IDs and secrets
+    assert_ne!(wh1["id"], wh2["id"]);
+    assert_ne!(wh1["secret"], wh2["secret"]);
+
+    // List should show both
+    let resp = client
+        .get("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let webhooks = body["webhooks"].as_array().unwrap();
+    assert!(webhooks.len() >= 2);
+}
+
+// ── Webhook: deactivate and reactivate ──
+
+#[test]
+fn test_webhook_deactivate_reactivate() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url":"https://hook.example.com/toggle"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let wh_id = body["id"].as_str().unwrap();
+    assert_eq!(body["active"], true);
+
+    // Deactivate
+    let resp = client
+        .patch(format!("/api/v1/webhooks/{}", wh_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"active":false}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["active"], false);
+
+    // Reactivate
+    let resp = client
+        .patch(format!("/api/v1/webhooks/{}", wh_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"active":true}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert_eq!(body["active"], true);
+}
+
+// ── Webhook: HMAC secret only shown once ──
+
+#[test]
+fn test_webhook_secret_only_on_create() {
+    let (client, key) = setup_client();
+
+    // Create webhook — secret visible
+    let resp = client
+        .post("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"url":"https://hook.example.com/secret-test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["secret"].is_string());
+    let wh_id = body["id"].as_str().unwrap();
+
+    // List webhooks — secret should be hidden
+    let resp = client
+        .get("/api/v1/webhooks")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let webhooks = body["webhooks"].as_array().unwrap();
+    let our_wh = webhooks.iter().find(|w| w["id"] == wh_id);
+    assert!(our_wh.is_some());
+    // Secret should be null or absent in list
+    let wh = our_wh.unwrap();
+    assert!(wh.get("secret").is_none() || wh["secret"].is_null());
+}
+
+// ── Key management: create + list + revoke lifecycle ──
+
+#[test]
+fn test_key_full_lifecycle() {
+    let (client, key) = setup_client();
+
+    // Create a new key
+    let resp = client
+        .post("/api/v1/keys")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"test-lifecycle-key"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let new_key = body["api_key"].as_str().unwrap().to_string();
+    assert!(!new_key.is_empty());
+
+    // Use the new key to submit an app
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", new_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Key Lifecycle App","short_description":"Test","description":"Test key lifecycle","author_name":"Test"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    // List keys to find the new key's ID
+    let resp = client
+        .get("/api/v1/keys")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let keys = body["keys"].as_array().unwrap();
+    // Find the key with name "test-lifecycle-key"
+    let our_key = keys
+        .iter()
+        .find(|k| k["name"] == "test-lifecycle-key")
+        .expect("should find our key in list");
+    let key_id = our_key["id"].as_str().unwrap().to_string();
+
+    // Revoke it
+    let resp = client
+        .delete(format!("/api/v1/keys/{}", key_id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    // Revoked key should no longer work
+    let resp = client
+        .get("/api/v1/keys")
+        .header(Header::new("X-API-Key", new_key))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Unauthorized);
+}
+
+// ── Search: combined category + protocol filter ──
+
+#[test]
+fn test_search_combined_filters() {
+    let (client, key) = setup_client();
+
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Search Filter MCP","short_description":"MCP tool","description":"An MCP tool for testing","author_name":"Test","protocol":"mcp","category":"ai-ml"}"#)
+        .dispatch();
+
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Search Filter REST","short_description":"REST tool","description":"A REST tool for testing","author_name":"Test","protocol":"rest","category":"ai-ml"}"#)
+        .dispatch();
+
+    // Search with category filter
+    let resp = client
+        .get("/api/v1/apps/search?q=tool&category=ai-ml")
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    let results = body["apps"].as_array().unwrap();
+    for app in results {
+        assert_eq!(app["category"], "ai-ml");
+    }
+
+    // Search with protocol filter
+    let resp = client
+        .get("/api/v1/apps/search?q=tool&protocol=mcp")
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    let results = body["apps"].as_array().unwrap();
+    for app in results {
+        assert_eq!(app["protocol"], "mcp");
+    }
+}
+
+// ── Error response format consistency ──
+
+#[test]
+fn test_error_404_response_format() {
+    let (client, _) = setup_client();
+
+    let resp = client
+        .get("/api/v1/apps/nonexistent-slug-that-does-not-exist")
+        .dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["error"].is_string());
+    assert!(body["message"].is_string());
+}
+
+#[test]
+fn test_error_401_response_format() {
+    let (client, _) = setup_client();
+
+    let resp = client.get("/api/v1/keys").dispatch();
+    assert_eq!(resp.status(), Status::Unauthorized);
+    // 401 may be Rocket's default handler (not JSON) or custom JSON
+    let body_str = resp.into_string().unwrap_or_default();
+    assert!(!body_str.is_empty(), "401 response should have a body");
+}
+
+#[test]
+fn test_error_invalid_api_key() {
+    let (client, _) = setup_client();
+
+    let resp = client
+        .get("/api/v1/keys")
+        .header(Header::new("X-API-Key", "totally-invalid-key"))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Unauthorized);
+}
+
+// ── Submission: all protocols accepted ──
+
+#[test]
+fn test_all_protocols_accepted() {
+    let (client, key) = setup_client();
+
+    let protocols = ["rest", "graphql", "grpc", "mcp", "a2a", "websocket", "other"];
+
+    for proto in protocols {
+        let resp = client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(format!(
+                r#"{{"name":"Proto {} App","short_description":"Test","description":"Protocol test","author_name":"Test","protocol":"{}"}}"#,
+                proto, proto
+            ))
+            .dispatch();
+        assert_eq!(resp.status(), Status::Created, "Protocol {} should be accepted", proto);
+
+        // Verify protocol on GET
+        let body: Value = resp.into_json().unwrap();
+        let id = body["app_id"].as_str().unwrap();
+        let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+        let app: Value = resp.into_json().unwrap();
+        assert_eq!(app["protocol"], proto);
+    }
+}
+
+// ── Submission: all valid categories accepted ──
+
+#[test]
+fn test_all_categories_accepted() {
+    let (client, key) = setup_client();
+
+    let categories = [
+        "communication", "data", "developer-tools", "finance", "media",
+        "productivity", "search", "security", "social", "ai-ml",
+        "infrastructure", "other",
+    ];
+
+    for cat in categories {
+        let resp = client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(format!(
+                r#"{{"name":"Cat {} App","short_description":"Test","description":"Category test","author_name":"Test","category":"{}"}}"#,
+                cat, cat
+            ))
+            .dispatch();
+        assert_eq!(resp.status(), Status::Created, "Category {} should be accepted", cat);
+    }
+}
+
+// ── Sort: newest first (default) ──
+
+#[test]
+fn test_list_apps_default_newest_first() {
+    let (client, key) = setup_client();
+
+    for i in 0..3 {
+        client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(format!(
+                r#"{{"name":"Sort App {}","short_description":"Test","description":"Sort test {}","author_name":"Test"}}"#,
+                i, i
+            ))
+            .dispatch();
+        // Small sleep not needed since SQLite datetime has second resolution
+    }
+
+    let resp = client.get("/api/v1/apps").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    assert!(apps.len() >= 3);
+
+    // Default sort is newest first → last submitted should be first in list
+    if apps.len() >= 2 {
+        let first_created = apps[0]["created_at"].as_str().unwrap();
+        let second_created = apps[1]["created_at"].as_str().unwrap();
+        assert!(first_created >= second_created, "Default sort should be newest first");
+    }
+}
+
+// ── Sort: by name ascending ──
+
+#[test]
+fn test_list_apps_sort_by_name_ascending() {
+    let (client, key) = setup_client();
+
+    let names = ["Zebra App", "Alpha App", "Middle App"];
+    for name in names {
+        client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(format!(
+                r#"{{"name":"{}","short_description":"Test","description":"Sort test","author_name":"Test"}}"#,
+                name
+            ))
+            .dispatch();
+    }
+
+    let resp = client.get("/api/v1/apps?sort=name").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    assert!(apps.len() >= 3);
+
+    // Verify alphabetical order
+    for i in 0..apps.len() - 1 {
+        let a = apps[i]["name"].as_str().unwrap().to_lowercase();
+        let b = apps[i + 1]["name"].as_str().unwrap().to_lowercase();
+        assert!(a <= b, "Apps should be sorted alphabetically: {} <= {}", a, b);
+    }
+}
+
+// ── Unicode content handling ──
+
+#[test]
+fn test_unicode_app_content() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"日本語アプリ","short_description":"テストアプリ","description":"🚀 Unicode app with CJK characters: 中文, 한국어, العربية","author_name":"テスター","tags":["emoji","🎯","cjk"]}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Verify unicode content via GET
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["name"], "日本語アプリ");
+    assert!(app["description"].as_str().unwrap().contains("🚀"));
+    let tags = app["tags"].as_array().unwrap();
+    assert!(tags.contains(&serde_json::json!("🎯")));
+}
+
+// ── Unicode review content ──
+
+#[test]
+fn test_unicode_review() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Unicode Review Target","short_description":"Test","description":"For unicode reviews","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    let resp = client
+        .post(format!("/api/v1/apps/{}/reviews", id))
+        .header(ContentType::JSON)
+        .body(r#"{"rating":5,"title":"素晴らしい！","comment":"これは最高のアプリです 🎉","reviewer_name":"日本のエージェント"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let reviews = body["reviews"].as_array().unwrap();
+    assert!(!reviews.is_empty());
+    assert_eq!(reviews[0]["title"], "素晴らしい！");
+}
+
+// ── App response timestamps ──
+
+#[test]
+fn test_app_timestamps() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Timestamp App","short_description":"Test","description":"Timestamps test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Check timestamps via GET
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert!(app["created_at"].is_string());
+
+    // Update
+    let resp = client
+        .patch(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"description":"Updated for timestamp check"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert!(app["created_at"].is_string());
+    assert!(app["updated_at"].is_string());
+}
+
+// ── Tags replacement on update ──
+
+#[test]
+fn test_tags_replaced_on_update() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Tags Update App","short_description":"Test","description":"Tags update test","author_name":"Test","tags":["old","original"]}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Update tags
+    let resp = client
+        .patch(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"tags":["new","replaced"]}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    let tags: Vec<String> = app["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap().to_string())
+        .collect();
+    assert!(tags.contains(&"new".to_string()));
+    assert!(tags.contains(&"replaced".to_string()));
+    assert!(!tags.contains(&"old".to_string()));
+}
+
+// ── Categories count reflects actual apps ──
+
+#[test]
+fn test_categories_count_accuracy() {
+    let (client, key) = setup_client();
+
+    // Submit 2 apps in "security", 1 in "infrastructure"
+    for i in 0..2 {
+        client
+            .post("/api/v1/apps")
+            .header(Header::new("X-API-Key", key.clone()))
+            .header(ContentType::JSON)
+            .body(format!(
+                r#"{{"name":"Security App {}","short_description":"Test","description":"Security test","author_name":"Test","category":"security"}}"#,
+                i
+            ))
+            .dispatch();
+    }
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Infra App","short_description":"Test","description":"Infrastructure test","author_name":"Test","category":"infrastructure"}"#)
+        .dispatch();
+
+    let resp = client.get("/api/v1/categories").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let cats = body["categories"].as_array().unwrap();
+
+    let security = cats.iter().find(|c| c["name"] == "security");
+    assert!(security.is_some());
+    assert_eq!(security.unwrap()["count"], 2);
+
+    let infra = cats.iter().find(|c| c["name"] == "infrastructure");
+    assert!(infra.is_some());
+    assert_eq!(infra.unwrap()["count"], 1);
+}
+
+// ── OpenAPI spec structure validation ──
+
+#[test]
+fn test_openapi_spec_structure() {
+    let (client, _) = setup_client();
+
+    let resp = client.get("/api/v1/openapi.json").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let spec: Value = resp.into_json().unwrap();
+    assert_eq!(spec["openapi"], "3.0.3");
+    assert!(spec["info"]["title"].is_string());
+    assert!(spec["info"]["version"].is_string());
+    assert!(spec["paths"].is_object());
+    // Should have at least 15 paths
+    let paths = spec["paths"].as_object().unwrap();
+    assert!(paths.len() >= 15, "OpenAPI should have at least 15 paths, got {}", paths.len());
+}
+
+// ── My apps: shows only submitter's apps ──
+
+#[test]
+fn test_my_apps_isolation() {
+    let (client, key, path) = setup_client_with_path();
+
+    // Create second key
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let key2 = app_directory::auth::create_api_key(&conn, "agent2", false, Some(10000));
+    drop(conn);
+
+    // Key 1 submits app
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Key1 App","short_description":"Test","description":"Belongs to key1","author_name":"Test"}"#)
+        .dispatch();
+
+    // Key 2 submits app
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key2.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Key2 App","short_description":"Test","description":"Belongs to key2","author_name":"Test"}"#)
+        .dispatch();
+
+    // Key 1 /mine should only show key1's app
+    let resp = client
+        .get("/api/v1/apps/mine")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    for app in apps {
+        assert_ne!(app["name"], "Key2 App", "Key1 should not see Key2's apps in /mine");
+    }
+
+    // Key 2 /mine should only show key2's app
+    let resp = client
+        .get("/api/v1/apps/mine")
+        .header(Header::new("X-API-Key", key2))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    for app in apps {
+        assert_ne!(app["name"], "Key1 App", "Key2 should not see Key1's apps in /mine");
+    }
+}
+
+// ── Batch health check: requires admin ──
+
+#[test]
+fn test_batch_health_check_requires_admin() {
+    let (client, _, path) = setup_client_with_path();
+
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let user_key = app_directory::auth::create_api_key(&conn, "user", false, Some(10000));
+    drop(conn);
+
+    let resp = client
+        .post("/api/v1/apps/health-check/batch")
+        .header(Header::new("X-API-Key", user_key))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Forbidden);
+}
+
+// ── Batch health check: admin success ──
+
+#[test]
+fn test_batch_health_check_admin() {
+    let (client, key) = setup_client();
+
+    // Submit an app with URL
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Batch Health App","short_description":"Test","description":"Batch health check test","author_name":"Test","api_url":"https://httpbin.org/status/200"}"#)
+        .dispatch();
+
+    let resp = client
+        .post("/api/v1/apps/health-check/batch")
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["total"].is_number());
+    assert!(body["results"].is_array());
+}
+
+// ── Delete with wrong edit token ──
+
+#[test]
+fn test_delete_wrong_edit_token() {
+    let (client, _) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Wrong Token Delete","short_description":"Test","description":"Test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    let resp = client
+        .delete(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-Edit-Token", "wrong-token-value"))
+        .dispatch();
+    assert!(
+        resp.status() == Status::Forbidden || resp.status() == Status::Unauthorized,
+        "Wrong token should be rejected"
+    );
+}
+
+// ── Large tags array ──
+
+#[test]
+fn test_large_tags_array() {
+    let (client, key) = setup_client();
+
+    let tags: Vec<String> = (0..20).map(|i| format!("tag-{}", i)).collect();
+    let tags_json = serde_json::to_string(&tags).unwrap();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(format!(
+            r#"{{"name":"Many Tags App","short_description":"Test","description":"Test with many tags","author_name":"Test","tags":{}}}"#,
+            tags_json
+        ))
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Verify tags via GET
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    let result_tags = app["tags"].as_array().unwrap();
+    assert_eq!(result_tags.len(), 20);
+}
+
+// ── App with all optional fields ──
+
+#[test]
+fn test_submit_with_all_optional_fields() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{
+            "name": "Full App",
+            "short_description": "A fully-specified app",
+            "description": "This app has every optional field set",
+            "author_name": "Complete Author",
+            "protocol": "mcp",
+            "category": "ai-ml",
+            "tags": ["complete", "full"],
+            "homepage_url": "https://example.com",
+            "api_url": "https://api.example.com/v1",
+            "api_spec_url": "https://api.example.com/openapi.json",
+            "logo_url": "https://example.com/logo.png",
+            "author_url": "https://example.com/author"
+        }"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Verify all fields via GET
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["name"], "Full App");
+    assert_eq!(app["protocol"], "mcp");
+    assert_eq!(app["category"], "ai-ml");
+    assert!(app["homepage_url"].is_string());
+    assert!(app["api_url"].is_string());
+    assert!(app["api_spec_url"].is_string());
+    assert!(app["logo_url"].is_string());
+    assert!(app["author_url"].is_string());
+}
+
+// ── Deprecation: verified fields cleared on undeprecate ──
+
+#[test]
+fn test_undeprecate_clears_all_fields() {
+    let (client, key) = setup_client();
+
+    // Submit + submit second app for replacement
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Replacement App","short_description":"Test","description":"This replaces the old one","author_name":"Test"}"#)
+        .dispatch();
+    let replacement: Value = resp.into_json().unwrap();
+    let replacement_id = replacement["app_id"].as_str().unwrap();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"To Be Undeprecated","short_description":"Test","description":"Will be undeprecated","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Deprecate with replacement + sunset
+    client
+        .post(format!("/api/v1/apps/{}/deprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(format!(
+            r#"{{"reason":"Being replaced","replacement_app_id":"{}","sunset_at":"2026-12-31T00:00:00Z"}}"#,
+            replacement_id
+        ))
+        .dispatch();
+
+    // Verify all deprecation fields set
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["status"], "deprecated");
+    assert!(app["deprecated_reason"].is_string());
+    assert!(app["deprecated_at"].is_string());
+    assert!(app["replacement_app_id"].is_string());
+    assert!(app["sunset_at"].is_string());
+
+    // Undeprecate
+    client
+        .post(format!("/api/v1/apps/{}/undeprecate", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+
+    // All deprecation fields should be cleared
+    let resp = client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    let app: Value = resp.into_json().unwrap();
+    assert_eq!(app["status"], "approved");
+    assert!(
+        app["deprecated_reason"].is_null()
+            || app["deprecated_reason"].as_str().unwrap_or("").is_empty()
+    );
+    assert!(app["replacement_app_id"].is_null());
+    assert!(app["sunset_at"].is_null());
+}
+
+// ── Slug: special characters stripped ──
+
+#[test]
+fn test_slug_strips_special_characters() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"My App! (v2.0) - Special @#$","short_description":"Test","description":"Slug special char test","author_name":"Test"}"#)
+        .dispatch();
+    assert_eq!(resp.status(), Status::Created);
+    let body: Value = resp.into_json().unwrap();
+    let slug = body["slug"].as_str().unwrap();
+    // Slug should be lowercase, no special chars
+    assert!(!slug.contains('!'));
+    assert!(!slug.contains('@'));
+    assert!(!slug.contains('#'));
+    assert!(!slug.contains('$'));
+    assert!(slug.chars().all(|c| c.is_alphanumeric() || c == '-'));
+}
+
+// ── Verified badge filter ──
+
+#[test]
+fn test_filter_verified_apps() {
+    let (client, key) = setup_client();
+
+    // Submit and verify one app
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Verified App","short_description":"Test","description":"A verified app","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Set verified badge
+    client
+        .patch(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"is_verified":true}"#)
+        .dispatch();
+
+    // Submit non-verified app
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Unverified App","short_description":"Test","description":"Not verified","author_name":"Test"}"#)
+        .dispatch();
+
+    // Filter verified=true
+    let resp = client.get("/api/v1/apps?verified=true").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    for app in apps {
+        assert_eq!(app["is_verified"], true);
+    }
+    assert!(!apps.is_empty());
+}
+
+// ── Review ordering: newest first ──
+
+#[test]
+fn test_review_ordering() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Review Order App","short_description":"Test","description":"Review ordering test","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap();
+
+    // Submit multiple anonymous reviews
+    for i in 1..=4 {
+        client
+            .post(format!("/api/v1/apps/{}/reviews", id))
+            .header(ContentType::JSON)
+            .body(format!(r#"{{"rating":{},"title":"Review {}"}}"#, i, i))
+            .dispatch();
+    }
+
+    let resp = client
+        .get(format!("/api/v1/apps/{}/reviews", id))
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    assert!(body["total"].as_i64().unwrap() >= 4);
+    let reviews = body["reviews"].as_array().unwrap();
+    // Verify ordering — newest first (most recent should be rating 4)
+    if reviews.len() >= 2 {
+        let first_created = reviews[0]["created_at"].as_str().unwrap_or("");
+        let second_created = reviews[1]["created_at"].as_str().unwrap_or("");
+        assert!(first_created >= second_created, "Reviews should be newest first");
+    }
+}
+
+// ── SSE stream endpoint accessible ──
+
+#[test]
+fn test_sse_stream_accessible() {
+    let (client, _) = setup_client();
+
+    // SSE endpoint should be public (no auth)
+    let resp = client.get("/api/v1/events/stream").dispatch();
+    // Should return 200 with event-stream content type
+    assert_eq!(resp.status(), Status::Ok);
+    let ct = resp.content_type();
+    assert!(ct.is_some());
+}
+
+// ── Delete cascade: views cleaned up ──
+
+#[test]
+fn test_delete_cascade_views_cleaned() {
+    let (client, key) = setup_client();
+
+    let resp = client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Delete Views App","short_description":"Test","description":"Delete cascade views","author_name":"Test"}"#)
+        .dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let id = body["app_id"].as_str().unwrap().to_string();
+
+    // Generate some views
+    for _ in 0..5 {
+        client.get(format!("/api/v1/apps/{}", id)).dispatch();
+    }
+
+    // Verify views exist
+    let resp = client.get(format!("/api/v1/apps/{}/stats", id)).dispatch();
+    let stats: Value = resp.into_json().unwrap();
+    assert!(stats["total_views"].as_i64().unwrap() >= 5);
+
+    // Delete app
+    client
+        .delete(format!("/api/v1/apps/{}", id))
+        .header(Header::new("X-API-Key", key.clone()))
+        .dispatch();
+
+    // Stats should 404
+    let resp = client.get(format!("/api/v1/apps/{}/stats", id)).dispatch();
+    assert_eq!(resp.status(), Status::NotFound);
+}
+
+// ── Multiple apps: category isolation ──
+
+#[test]
+fn test_category_filter_isolation() {
+    let (client, key) = setup_client();
+
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Data App","short_description":"Test","description":"A data app","author_name":"Test","category":"data"}"#)
+        .dispatch();
+
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Finance App","short_description":"Test","description":"A finance app","author_name":"Test","category":"finance"}"#)
+        .dispatch();
+
+    // Filter by data should not include finance
+    let resp = client.get("/api/v1/apps?category=data").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    for app in apps {
+        assert_eq!(app["category"], "data");
+    }
+
+    // Filter by finance should not include data
+    let resp = client.get("/api/v1/apps?category=finance").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    for app in apps {
+        assert_eq!(app["category"], "finance");
+    }
+}
