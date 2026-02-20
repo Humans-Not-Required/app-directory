@@ -2,14 +2,14 @@
 
 ## Current State: Core Backend ✅ + Rate Limiting ✅ + Featured/Verified Badges ✅ + Health Check Monitoring ✅ + Webhooks ✅ + SSE Events ✅ + Scheduled Health Checks ✅ + Approval Workflow ✅ + App Statistics ✅ + Deprecation Workflow ✅ + Frontend ✅ + Unified Serving ✅ + README Complete ✅ + 96 Tests Passing ✅
 
-**Tests:** 170 Rust (167 integration + 3 unit) + 209 Python SDK = 379 total  
+**Tests:** 171 Rust (168 integration + 3 unit) + 209 Python SDK = 380 total  
 **Python SDK** shipped (209 integration tests). Rust/Rocket + SQLite backend with full app CRUD, search, reviews with aggregate ratings, category listing, API key management, per-key rate limiting with response headers, featured/verified badge system, health check monitoring with batch checks and uptime tracking, scheduled background health checks, webhook notifications with HMAC-SHA256 signing, SSE real-time event stream, app approval workflow with dedicated approve/reject endpoints, app statistics with view tracking and trending, app deprecation workflow with replacement tracking and sunset dates, **React frontend with browse/search/submit/admin dashboard served from Rocket via unified serving**, and OpenAPI spec. Compiles cleanly (clippy -D warnings), all tests pass (run with `--test-threads=1`).
 
 ### What's Done
 
 - **Core API** (all routes implemented):
   - `POST /api/v1/apps` — Submit app with name, description, protocol, category, tags, URLs
-  - `GET /api/v1/apps` — List apps (paginated, filterable by category/protocol/status/featured/verified/health, sortable)
+  - `GET /api/v1/apps` — List apps (paginated, filterable by category/protocol/status/featured/verified/health, sortable, `?search=` keyword filter across name/description/tags)
   - `GET /api/v1/apps/search?q=<query>` — Full-text search across name, description, tags
   - `GET /api/v1/apps/<id_or_slug>` — Get by UUID or URL slug
   - `PATCH /api/v1/apps/<id>` — Update (owner or admin only)

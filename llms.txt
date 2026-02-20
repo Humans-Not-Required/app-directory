@@ -17,7 +17,7 @@
 ## Core Endpoints
 
 ### Apps
-- GET /api/v1/apps — list apps (paginated, filterable: ?category=&protocol=&status=&featured=true&verified=true&health=healthy)
+- GET /api/v1/apps — list apps (paginated, filterable: ?category=&protocol=&status=&featured=true&verified=true&health=healthy&search=keyword)
 - GET /api/v1/apps/search?q={query} — full-text search
 - GET /api/v1/apps/{id_or_slug} — get app by UUID or slug
 - POST /api/v1/apps — submit new app (returns edit_token)

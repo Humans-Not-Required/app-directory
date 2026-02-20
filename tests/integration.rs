@@ -5507,3 +5507,58 @@ fn test_category_filter_isolation() {
         assert_eq!(app["category"], "finance");
     }
 }
+
+#[test]
+fn test_list_apps_search_param() {
+    let (client, admin_key) = setup_client();
+
+    // Create two apps with distinct names/descriptions (admin key → auto-approved)
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"SearchTarget Alpha","short_description":"Unique identifier alpha","description":"An app for testing search","author_name":"Tester","category":"developer-tools"}"#)
+        .dispatch();
+
+    client
+        .post("/api/v1/apps")
+        .header(Header::new("X-API-Key", admin_key.clone()))
+        .header(ContentType::JSON)
+        .body(r#"{"name":"Unrelated Beta","short_description":"Completely different thing","description":"No match here","author_name":"Tester","category":"developer-tools"}"#)
+        .dispatch();
+
+    // Search via ?search= on the list endpoint — should filter by name
+    let resp = client.get("/api/v1/apps?search=alpha").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    assert!(
+        apps.iter().any(|a| a["name"].as_str().unwrap_or("").to_lowercase().contains("alpha")),
+        "search=alpha should return apps matching 'alpha'"
+    );
+    // Beta app should not appear in alpha search
+    assert!(
+        !apps.iter().any(|a| a["name"].as_str().unwrap_or("") == "Unrelated Beta"),
+        "search=alpha should not return 'Unrelated Beta'"
+    );
+
+    // Search by short_description term
+    let resp = client.get("/api/v1/apps?search=unique%20identifier%20alpha").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let total = body["total"].as_i64().unwrap_or(0);
+    assert!(total >= 1, "search by short_description term should find at least 1 result");
+
+    // Search for non-existent term returns empty
+    let resp = client.get("/api/v1/apps?search=zzz_nonexistent_zzz_xyzabc").dispatch();
+    let body: Value = resp.into_json().unwrap();
+    let apps = body["apps"].as_array().unwrap();
+    assert!(apps.is_empty(), "search for non-existent term should return empty list");
+
+    // Search with empty string returns all apps (same as no filter)
+    let resp = client.get("/api/v1/apps?search=").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().unwrap();
+    let total_empty = body["total"].as_i64().unwrap_or(0);
+    assert!(total_empty >= 2, "empty search= should return all approved apps");
+}
+

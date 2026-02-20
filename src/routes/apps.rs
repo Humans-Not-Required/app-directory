@@ -133,7 +133,7 @@ pub fn submit_app(
 // === List Apps (NO AUTH REQUIRED) ===
 
 #[get(
-    "/apps?<category>&<protocol>&<status>&<featured>&<verified>&<health>&<sort>&<page>&<per_page>"
+    "/apps?<category>&<protocol>&<status>&<featured>&<verified>&<health>&<sort>&<page>&<per_page>&<search>"
 )]
 #[allow(clippy::too_many_arguments)]
 pub fn list_apps(
@@ -146,6 +146,7 @@ pub fn list_apps(
     sort: Option<String>,
     page: Option<i64>,
     per_page: Option<i64>,
+    search: Option<String>,
     db: &rocket::State<DbState>,
 ) -> Json<Value> {
     let conn = db.conn();
@@ -161,6 +162,17 @@ pub fn list_apps(
     if status_filter != "all" {
         conditions.push(format!("status = ?{}", params.len() + 1));
         params.push(Box::new(status_filter));
+    }
+
+    if let Some(ref q) = search {
+        if !q.is_empty() {
+            let pattern = format!("%{}%", q.to_lowercase());
+            conditions.push(format!(
+                "(LOWER(name) LIKE ?{p} OR LOWER(short_description) LIKE ?{p} OR LOWER(description) LIKE ?{p} OR LOWER(tags) LIKE ?{p})",
+                p = params.len() + 1
+            ));
+            params.push(Box::new(pattern));
+        }
     }
 
     if let Some(ref cat) = category {

@@ -123,6 +123,15 @@
               "default": 20,
               "maximum": 100
             }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter apps by keyword (searches name, short_description, description, and tags). Case-insensitive substring match."
           }
         ],
         "security": [
