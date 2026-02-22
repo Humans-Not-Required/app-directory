@@ -190,8 +190,9 @@ pub fn rocket_with_path(db_path: &str) -> rocket::Rocket<rocket::Build> {
             ],
         );
 
-    // Mount llms.txt + well-known skills at root level for standard discovery
+    // Mount SKILL.md, llms.txt + well-known skills at root level for standard discovery
     rocket = rocket.mount("/", routes![
+        routes::skill_md,
         routes::root_llms_txt,
         routes::skills_index,
         routes::skills_skill_md,

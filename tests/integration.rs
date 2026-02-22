@@ -3070,12 +3070,25 @@ fn test_skills_skill_md() {
     let resp = client.get("/.well-known/skills/app-directory/SKILL.md").dispatch();
     assert_eq!(resp.status(), Status::Ok);
     let body = resp.into_string().unwrap();
-    assert!(body.starts_with("---"), "Missing YAML frontmatter");
-    assert!(body.contains("name: app-directory"), "Missing skill name");
+    assert!(body.contains("# App Directory"), "Missing title");
     assert!(body.contains("## Quick Start"), "Missing Quick Start");
     assert!(body.contains("## Auth Model"), "Missing Auth Model");
     assert!(body.contains("Categories"), "Missing categories section");
     assert!(body.contains("Reviews"), "Missing reviews section");
+}
+
+#[test]
+fn test_skill_md_root() {
+    let (client, _) = setup_client();
+    let resp = client.get("/SKILL.md").dispatch();
+    assert_eq!(resp.status(), Status::Ok);
+    let body = resp.into_string().unwrap();
+    assert!(body.contains("# App Directory"));
+    // Verify llms.txt serves same content
+    let llms_resp = client.get("/llms.txt").dispatch();
+    assert_eq!(llms_resp.status(), Status::Ok);
+    let llms_body = llms_resp.into_string().unwrap();
+    assert_eq!(body, llms_body, "llms.txt should alias SKILL.md");
 }
 
 // ── Anonymous Review Bug Fix ──
