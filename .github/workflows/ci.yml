@@ -78,3 +78,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - name: Trigger staging deploy
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
+            https://webhook.hnrstage.xyz/v1/update
