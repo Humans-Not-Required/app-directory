@@ -122,7 +122,7 @@ pub fn rocket_with_path(db_path: &str) -> rocket::Rocket<rocket::Build> {
     let port: u16 = std::env::var("ROCKET_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(8002);
+        .unwrap_or(8000);
 
     // Rate limit window: configurable via RATE_LIMIT_WINDOW_SECS (default: 60s)
     let window_secs: u64 = std::env::var("RATE_LIMIT_WINDOW_SECS")
